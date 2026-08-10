@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:nextos:nxport:schema:2",
+  "title": "NextOS universal port declaration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "title",
+    "launcher_name",
+    "architecture",
+    "executable",
+    "nxextract"
+  ],
+  "$defs": {
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(?!/)(?![A-Za-z]:[\\\\/])(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*(?:^|/)(?:home|Users)/)[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+    },
+    "relative_path_or_empty": {
+      "anyOf": [
+        {
+          "const": ""
+        },
+        {
+          "$ref": "#/$defs/relative_path"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+    },
+    "launcher_name": {
+      "type": "string",
+      "minLength": 4,
+      "maxLength": 160,
+      "pattern": "^[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+\\.sh$"
+    },
+    "architecture": {
+      "enum": [
+        "armv7",
+        "aarch64",
+        "i386",
+        "x86_64"
+      ]
+    },
+    "executable": {
+      "$ref": "#/$defs/relative_path"
+    },
+    "argument_mode": {
+      "enum": [
+        "none",
+        "passthrough",
+        "game-dir",
+        "game-dir-and-passthrough"
+      ]
+    },
+    "home_mode": {
+      "enum": [
+        "preserve",
+        "port"
+      ]
+    },
+    "nxextract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "version"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "auto",
+            "yes",
+            "no"
+          ]
+        },
+        "version": {
+          "const": "1.2.6"
+        }
+      }
+    },
+    "required_files": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/relative_path"
+      }
+    },
+    "private_library_paths": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/relative_path"
+      }
+    },
+    "prepare_script": {
+      "$ref": "#/$defs/relative_path_or_empty"
+    },
+    "required_capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^(host|graphics|audio|input)\\.[a-z0-9][a-z0-9.-]{0,62}$",
+        "enum": [
+          "host.portmaster",
+          "host.armhf-libs",
+          "host.aarch64-libs",
+          "host.i386-libs",
+          "host.session-runtime",
+          "host.short-memory",
+          "host.fuse-like-filesystem",
+          "host.network-filesystem",
+          "host.fbdev",
+          "host.drm",
+          "host.drm-connected",
+          "host.wayland",
+          "host.x11",
+          "audio.pulse-socket",
+          "audio.pipewire-socket",
+          "audio.alsa",
+          "graphics.window",
+          "graphics.gles2",
+          "graphics.gles3",
+          "graphics.egl",
+          "graphics.egl-config",
+          "graphics.drawable",
+          "graphics.etc1",
+          "graphics.etc2",
+          "graphics.astc",
+          "graphics.npot-full",
+          "audio.output-open",
+          "input.controller-mapping",
+          "input.controller-api",
+          "input.controller-connected",
+          "input.hotplug"
+        ]
+      }
+    },
+    "enabled_quirks": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^(adapter|engine|game)\\.[a-z0-9][a-z0-9._-]{0,62}$"
+      }
+    },
+    "runtime_report": {
+      "enum": [
+        "log",
+        "log-and-logo"
+      ]
+    }
+  }
+}

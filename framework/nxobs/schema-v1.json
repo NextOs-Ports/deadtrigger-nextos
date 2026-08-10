@@ -1,0 +1,19 @@
+{
+  "schema": "nx-observability-schema-v1",
+  "schema_version": 1,
+  "event_schema": "nx-event-v1",
+  "bundle_schema": "nx-support-bundle-v1",
+  "maximum_input_bytes": 8388608,
+  "maximum_line_bytes": 65536,
+  "maximum_events": 2048,
+  "sources": ["bootstrap", "extractor", "loader", "graphics", "audio", "input", "lifecycle", "diagnostic"],
+  "statuses": ["begin", "ok", "failed", "observed", "skipped"],
+  "privacy": {
+    "raw_logs_in_bundle": false,
+    "absolute_paths": false,
+    "network_addresses": false,
+    "hostnames": false,
+    "credentials": false,
+    "save_data": false
+  }
+}

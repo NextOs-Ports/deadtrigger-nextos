@@ -1,0 +1,1010 @@
+{
+  "schema_version": 1,
+  "classes": {
+    "pure": "Read-only/static validation; no temporary tree, hardware or signals",
+    "filesystem": "May create an owned mktemp tree and child tools; never signals or touches hardware",
+    "process": "Exercises supervision or signals and is permitted only inside the sealed user/PID/mount namespace",
+    "hardware": "May observe a real device/backend and is never part of an automatic host gate"
+  },
+  "policy": {
+    "logged_runner": "framework/tools/run-logged.sh",
+    "process_runner": "framework/nxbootstrap/tests/run-isolated.sh",
+    "hardware_automatic": false,
+    "host_signal_authority": "none",
+    "device_access_authority": "current-session explicit user authorization only"
+  },
+  "gates": [
+    {
+      "id": "test-infrastructure",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "framework/tests/test_infrastructure.py"
+      ],
+      "sources": [
+        "framework/tests/test_infrastructure.py"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "catalog",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "framework/catalog/tests/test_catalog.py"
+      ],
+      "sources": [
+        "framework/catalog/tests/test_catalog.py"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxport-contract",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "framework/nxbootstrap/tests/test-manifest-contract.py"
+      ],
+      "sources": [
+        "framework/nxbootstrap/tests/test-manifest-contract.py"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "portmaster-contract",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "framework/portmaster/tests/test_portmaster_contract.py"
+      ],
+      "sources": [
+        "framework/portmaster/tests/test_portmaster_contract.py"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "bootstrap-static-safety",
+      "class": "pure",
+      "command": [
+        "bash",
+        "framework/nxbootstrap/tests/test-safety-static.sh"
+      ],
+      "sources": [
+        "framework/nxbootstrap/tests/test-safety-static.sh"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "tooling-filesystem",
+      "class": "filesystem",
+      "command": [
+        "bash",
+        "framework/tests/test-tools.sh"
+      ],
+      "sources": [
+        "framework/tests/test-tools.sh"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "bootstrap-isolated",
+      "class": "process",
+      "command": [
+        "bash",
+        "framework/nxbootstrap/tests/run-isolated.sh"
+      ],
+      "sources": [
+        "framework/nxbootstrap/tests/test-nxbootstrap.sh",
+        "framework/nxbootstrap/tests/test-generator.sh",
+        "framework/nxbootstrap/tests/test-launcher-behavior.sh",
+        "framework/nxbootstrap/tests/test-runner-interruption.sh",
+        "framework/nxbootstrap/tests/test-namespace-watchdog.sh",
+        "framework/nxloader/tests/test_m10_aarch64_guest_gate_runner.py",
+        "framework/nxandroid/tests/test_signal.c"
+      ],
+      "support_files": [
+        "framework/nxbootstrap/tests/private-pid-namespace.sh",
+        "framework/nxbootstrap/tests/run-isolated.sh",
+        "framework/nxbootstrap/tests/namespace-watchdog.py",
+        "framework/nxbootstrap/tests/isolated-suite.sh",
+        "framework/nxandroid/CMakeLists.txt",
+        "framework/nxandroid/tests/run-signal-isolated.sh",
+        "framework/nxandroid/tools/inventory_m11_guests.py",
+        "framework/nxandroid/references/m11-android-guests-v1.json",
+        "framework/nxandroid/references/REFERENCE-AUDIT.md"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": true,
+      "signals": [
+        "HUP, INT and TERM direct generated launcher before game start",
+        "TERM plus immediate HUP or post-forward INT direct generated launcher during supervised game",
+        "signal 0 liveness probe for direct generated launcher test child",
+        "TERM direct child from generated launcher after PID and starttime validation",
+        "KILL direct child from generated launcher after bounded grace and PID and starttime validation",
+        "KILL direct generated launcher test child on behavioral watchdog timeout",
+        "TERM exact child with PID and starttime",
+        "KILL exact child with PID and starttime after bounded grace",
+        "TERM exact inspector-test child through pidfd",
+        "KILL exact inspector-test child through pidfd after bounded grace",
+        "KILL direct exact inspector child on pidfd acquisition or supervisor setup failure",
+        "signal 0 liveness probe for direct guest-gate selftest sibling",
+        "TERM direct guest-gate selftest sibling owned by Popen",
+        "KILL direct guest-gate selftest sibling owned by Popen after bounded grace",
+        "TERM exact nxandroid signal-test child through pidfd",
+        "KILL exact nxandroid signal-test child through pidfd after bounded grace",
+        "TERM direct readelf child owned by the inventory supervisor",
+        "KILL direct readelf child owned by the inventory supervisor after bounded grace"
+      ]
+    },
+    {
+      "id": "nxrelease",
+      "class": "filesystem",
+      "command": [
+        "bash",
+        "framework/nxrelease/tests/test_nxrelease.sh"
+      ],
+      "sources": [
+        "framework/nxrelease/tests/test_nxrelease.sh"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxrelease-m18-closure",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "framework/nxrelease/tests/test_m18_closure.py"
+      ],
+      "sources": [
+        "framework/nxrelease/tests/test_m18_closure.py"
+      ],
+      "support_files": [
+        "framework/nxrelease/m18-closure-v1.json",
+        "framework/nxrelease/nxrelease.py",
+        "framework/nxrelease/schema/nxrelease-v2.schema.json",
+        "framework/nxrelease/tests/test_nxrelease.sh",
+        "framework/nxrelease/RECOVERY.md"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxgenerator-host",
+      "class": "filesystem",
+      "command": [
+        "python3",
+        "-B",
+        "framework/nxgenerator/tests/test_nxgenerator.py"
+      ],
+      "sources": [
+        "framework/nxgenerator/tests/test_nxgenerator.py"
+      ],
+      "support_files": [
+        "framework/nxgenerator/nxgenerator.py",
+        "framework/nxgenerator/VERSION",
+        "framework/nxgenerator/schema/nxproject-v1.schema.json",
+        "framework/nxgenerator/templates/README.md.in",
+        "framework/nxgenerator/examples/nxproject-aarch64.example.json",
+        "framework/nxgenerator/examples/nxproject-armv7.example.json",
+        "framework/nxgenerator/README.md"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxgenerator-m19-closure",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "framework/nxgenerator/tests/test_m19_closure.py"
+      ],
+      "sources": [
+        "framework/nxgenerator/tests/test_m19_closure.py"
+      ],
+      "support_files": [
+        "framework/nxgenerator/m19-closure-v1.json"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "m20-closure",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "framework/tests/test_m20_closure.py"
+      ],
+      "sources": [
+        "framework/tests/test_m20_closure.py"
+      ],
+      "support_files": [
+        "framework/tests/m20-closure-v1.json",
+        "framework/tests/run-safe-gates.sh",
+        "framework/tests/capture-green-checkpoint.sh"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "m20-green-checkpoint",
+      "class": "filesystem",
+      "command": [
+        "bash",
+        "framework/tests/capture-green-checkpoint.sh",
+        "--checkpoint-root",
+        "$LOG_ROOT/checkpoints"
+      ],
+      "sources": [],
+      "support_files": [
+        "framework/tests/capture-green-checkpoint.sh",
+        "framework/tools/capture-checkpoint.sh"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxextract-python",
+      "class": "filesystem",
+      "command": [
+        "python3",
+        "-B",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "suportando_outros_devices/extrator-universal/tests",
+        "-p",
+        "test_*.py"
+      ],
+      "sources": [
+        "suportando_outros_devices/extrator-universal/tests/test_nxextract.py"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxextract-runtime-env",
+      "class": "filesystem",
+      "command": [
+        "bash",
+        "suportando_outros_devices/extrator-universal/tests/test_runtime_env.sh"
+      ],
+      "sources": [
+        "suportando_outros_devices/extrator-universal/tests/test_runtime_env.sh"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxextract-audit",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "framework/nxextract/tests/test_m07_audit.py"
+      ],
+      "sources": [
+        "framework/nxextract/tests/test_m07_audit.py"
+      ],
+      "support_files": [
+        "framework/nxextract/m07-audit-v1.json"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxextract-release",
+      "class": "filesystem",
+      "command": [
+        "bash",
+        "suportando_outros_devices/extrator-universal/tools/check-release.sh",
+        "--require-ui"
+      ],
+      "sources": [
+        "suportando_outros_devices/extrator-universal/tests/test_nxextract.py",
+        "suportando_outros_devices/extrator-universal/tests/test_runtime_env.sh",
+        "suportando_outros_devices/extrator-universal/tests/test_pin_gate.sh",
+        "suportando_outros_devices/extrator-universal/tests/test_elf_gate.sh"
+      ],
+      "support_files": [
+        "suportando_outros_devices/extrator-universal/tools/check-release.sh",
+        "suportando_outros_devices/extrator-universal/tools/check-glibc.sh",
+        "suportando_outros_devices/extrator-universal/ui/build/nxextract-ui"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "diff-check",
+      "class": "pure",
+      "command": [
+        "git",
+        "diff",
+        "--check",
+        "--",
+        "framework",
+        "suportando_outros_devices",
+        "publicando_ports"
+      ],
+      "sources": [],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxcompat-host",
+      "class": "filesystem",
+      "command": [
+        "bash",
+        "framework/nxcompat/tests/run-host.sh"
+      ],
+      "sources": [
+        "framework/nxcompat/tests/test_nxcompat.c",
+        "framework/nxcompat/tests/test_sdl2_adapter.c",
+        "framework/nxcompat/tests/test_m12_probe.c",
+        "framework/nxcompat/tests/test_nxcompat_registry.c",
+        "framework/nxcompat/tests/test_install_smoke.c",
+        "framework/nxgl/tests/test_nxgl_environment.c",
+        "framework/nxgl/tests/test_nxgl_nxcompat.c",
+        "framework/nxinput/tests/test_nxinput_nxcompat.c"
+      ],
+      "support_files": [
+        "framework/nxcompat/tests/run-host.sh",
+        "framework/nxcompat/CMakeLists.txt",
+        "framework/nxgl/CMakeLists.txt",
+        "framework/nxinput/CMakeLists.txt",
+        "framework/nxinput/tests/static_no_device_name_fallback.sh"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxcompat-m12-audit",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "framework/nxcompat/tests/test_m12_audit.py"
+      ],
+      "sources": [
+        "framework/nxcompat/tests/test_m12_audit.py"
+      ],
+      "support_files": [
+        "framework/nxcompat/m12-audit-v1.json"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxobs-m12a-host",
+      "class": "filesystem",
+      "command": [
+        "python3",
+        "-B",
+        "framework/nxobs/tests/test_m12a_observability.py"
+      ],
+      "sources": [
+        "framework/nxobs/tests/test_m12a_observability.py"
+      ],
+      "support_files": [
+        "framework/nxobs/nx-support-bundle.py",
+        "framework/nxobs/schema-v1.json",
+        "framework/nxobs/m12a-observability-v1.json",
+        "framework/nxobs/references/m12a-real-examples-v1.json"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxgl-m13-host",
+      "class": "filesystem",
+      "command": [
+        "bash",
+        "framework/nxgl/tests/run-m13-host.sh"
+      ],
+      "sources": [
+        "framework/nxgl/tests/test_nxgl_open_v2.c",
+        "framework/nxgl/tests/test_nxgl_present_v2.c",
+        "framework/nxgl/tests/test_nxgl_metrics.c",
+        "framework/nxgl/tests/test_nxgl_diagnostics.c"
+      ],
+      "support_files": [
+        "framework/nxgl/tests/run-m13-host.sh",
+        "framework/nxgl/CMakeLists.txt"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxgl-m13-audit",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "framework/nxgl/tests/test_m13_audit.py"
+      ],
+      "sources": [
+        "framework/nxgl/tests/test_m13_audit.py"
+      ],
+      "support_files": [
+        "framework/nxgl/m13-audit-v1.json",
+        "framework/nxgl/references/m13-video-evidence-v1.json"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxaudio-m14-host",
+      "class": "filesystem",
+      "command": [
+        "bash",
+        "framework/nxaudio/tests/run-host.sh"
+      ],
+      "sources": [
+        "framework/nxaudio/tests/test_nxaudio.c"
+      ],
+      "support_files": [
+        "framework/nxaudio/tests/run-host.sh",
+        "framework/nxaudio/CMakeLists.txt",
+        "framework/nxaudio/VERSION",
+        "framework/nxaudio/include/nxaudio.h",
+        "framework/nxaudio/src/nxaudio.c",
+        "framework/nxaudio/README.md"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxaudio-m14-audit",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "framework/nxaudio/tests/test_m14_audio_contract.py"
+      ],
+      "sources": [
+        "framework/nxaudio/tests/test_m14_audio_contract.py"
+      ],
+      "support_files": [
+        "framework/nxaudio/references/m14-audio-contract-v1.json"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxgl-native",
+      "class": "filesystem",
+      "command": null,
+      "sources": [
+        "framework/nxgl/tests/test_nxgl.c"
+      ],
+      "logged": true,
+      "automatic": false,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxabi-units",
+      "class": "filesystem",
+      "command": [
+        "python3",
+        "-B",
+        "framework/nxabi/tests/test_nxabi.py"
+      ],
+      "sources": [
+        "framework/nxabi/tests/test_nxabi.py"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxabi-m17-gate",
+      "class": "filesystem",
+      "command": [
+        "bash",
+        "framework/nxabi/tools/nx-abi-gate.sh"
+      ],
+      "sources": [
+        "framework/nxabi/tests/test_nxabi.py"
+      ],
+      "support_files": [
+        "framework/nxabi/tools/nx-abi-gate.sh",
+        "framework/nxabi/tools/check-determinism.sh"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxabi-m17-closure",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "framework/nxabi/tests/test_m17_closure.py"
+      ],
+      "sources": [
+        "framework/nxabi/tests/test_m17_closure.py"
+      ],
+      "support_files": [
+        "framework/nxabi/m17-closure-v1.json",
+        "framework/nxabi/policy-v1.json",
+        "framework/nxabi/TOOLCHAIN-PIN.json",
+        "framework/nxabi/m17-reference-audit-v1.json",
+        "framework/nxabi/tools/nx-abi-gate.sh"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxloader-audit",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "framework/nxloader/tests/test_m08_audit.py"
+      ],
+      "sources": [
+        "framework/nxloader/tests/test_m08_audit.py"
+      ],
+      "support_files": [
+        "framework/nxloader/m08-audit-v1.json"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxloader-m09-audit",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "framework/nxloader/tests/test_m09_audit.py"
+      ],
+      "sources": [
+        "framework/nxloader/tests/test_m09_audit.py"
+      ],
+      "support_files": [
+        "framework/nxloader/m09-audit-v1.json",
+        "framework/nxloader/m09-armv7-physical-evidence-v1.json"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxloader-m10-audit",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "framework/nxloader/tests/test_m10_audit.py"
+      ],
+      "sources": [
+        "framework/nxloader/tests/test_m10_audit.py"
+      ],
+      "support_files": [
+        "framework/nxloader/m10-audit-v1.json",
+        "framework/nxloader/tests/m10-approved-aarch64-guests-v1.json",
+        "framework/nxloader/tests/m10-aarch64-guests-evidence-v1.json",
+        "framework/nxloader/tests/m10-aarch64-guests-evidence-v1.log",
+        "framework/nxloader/tests/run_m10_aarch64_guest_gate.py"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxloader-host",
+      "class": "filesystem",
+      "command": [
+        "bash",
+        "framework/nxloader/tests/run-host.sh"
+      ],
+      "sources": [
+        "framework/nxloader/tests/test_nxloader.c",
+        "framework/nxloader/tests/test_fuzz_nxloader.c",
+        "framework/nxloader/tests/test_pending.c"
+      ],
+      "support_files": [
+        "framework/nxloader/tests/run-host.sh"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxloader-m11-audit",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "framework/nxloader/tests/test_m11_audit.py"
+      ],
+      "sources": [
+        "framework/nxloader/tests/test_m11_audit.py"
+      ],
+      "support_files": [
+        "framework/nxloader/m11-audit-v1.json"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxandroid-profile-audit",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "framework/nxandroid/tests/test_m11_adapter_profiles.py"
+      ],
+      "sources": [
+        "framework/nxandroid/tests/test_m11_adapter_profiles.py"
+      ],
+      "support_files": [
+        "framework/nxandroid/references/m11-adapter-profiles-v1.json",
+        "framework/nxandroid/references/m11-android-guests-v1.json",
+        "framework/nxandroid/references/REFERENCE-AUDIT.md"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxandroid-m11-audit",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "framework/nxandroid/tests/test_m11_audit.py"
+      ],
+      "sources": [
+        "framework/nxandroid/tests/test_m11_audit.py"
+      ],
+      "support_files": [
+        "framework/nxandroid/m11-audit-v1.json"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxandroid-m16-contract",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "framework/nxandroid/tests/test_m16_adapter_contract.py"
+      ],
+      "sources": [
+        "framework/nxandroid/tests/test_m16_adapter_contract.py"
+      ],
+      "support_files": [
+        "framework/nxandroid/references/m16-adapter-contract-v1.json",
+        "framework/nxandroid/references/m16-runtime-receipt-v1.json"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxloader-armv7-cross",
+      "class": "filesystem",
+      "command": [
+        "bash",
+        "framework/nxloader/tests/run-armv7-cross.sh"
+      ],
+      "sources": [
+        "framework/nxloader/tests/test_armv7_cross.c",
+        "framework/nxloader/tests/test_softfp.c"
+      ],
+      "support_files": [
+        "framework/nxloader/tests/run-armv7-cross.sh"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxloader-aarch64-cross",
+      "class": "filesystem",
+      "command": [
+        "bash",
+        "framework/nxloader/tests/run-aarch64-cross.sh"
+      ],
+      "sources": [
+        "framework/nxloader/tests/test_aarch64_cross.c"
+      ],
+      "support_files": [
+        "framework/nxloader/tests/run-aarch64-cross.sh"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxloader-m11-armv7-lifecycle-cross",
+      "class": "filesystem",
+      "command": [
+        "bash",
+        "framework/nxloader/tests/run-m11-armv7-lifecycle-cross.sh"
+      ],
+      "sources": [
+        "framework/nxloader/tests/test_m11_lifecycle_cross.c"
+      ],
+      "support_files": [
+        "framework/nxloader/tests/run-m11-armv7-lifecycle-cross.sh"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxloader-m11-aarch64-lifecycle-cross",
+      "class": "filesystem",
+      "command": [
+        "bash",
+        "framework/nxloader/tests/run-m11-aarch64-lifecycle-cross.sh"
+      ],
+      "sources": [
+        "framework/nxloader/tests/test_m11_lifecycle_cross.c"
+      ],
+      "support_files": [
+        "framework/nxloader/tests/run-m11-aarch64-lifecycle-cross.sh"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxandroid-host",
+      "class": "filesystem",
+      "command": [
+        "bash",
+        "framework/nxandroid/tests/run-host.sh"
+      ],
+      "sources": [
+        "framework/nxandroid/tests/test_nxandroid.c"
+      ],
+      "support_files": [
+        "framework/nxandroid/tests/run-host.sh"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxinput-m15-contract",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "framework/nxinput/tests/test_m15_input_contract.py"
+      ],
+      "sources": [
+        "framework/nxinput/tests/test_m15_input_contract.py"
+      ],
+      "support_files": [
+        "framework/nxinput/references/m15-input-contract-v1.json",
+        "framework/nxinput/references/m15-runtime-receipt-v1.json"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "chrono-m21-audit",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "ports/chrono/tests/test_m21_pilot.py"
+      ],
+      "sources": [
+        "ports/chrono/tests/test_m21_pilot.py"
+      ],
+      "support_files": [
+        "ports/chrono/references/m21-pilot-v1.json",
+        "ports/chrono/references/m21-host-receipt-v1.json"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "chrono-m21-host",
+      "class": "filesystem",
+      "command": [
+        "bash",
+        "ports/chrono/tests/run-m21-host.sh"
+      ],
+      "sources": [],
+      "support_files": [
+        "ports/chrono/tests/run-m21-host.sh",
+        "ports/chrono/build_universal.sh",
+        "ports/chrono/package/build-package.sh"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "chrono-m22-audit",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "ports/chrono/tests/test_m22_physical.py"
+      ],
+      "sources": [
+        "ports/chrono/tests/test_m22_physical.py"
+      ],
+      "support_files": [
+        "ports/chrono/references/m22-physical-receipt-v1.json"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "chrono-m23-audit",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "ports/chrono/tests/test_m23_promotion.py"
+      ],
+      "sources": [
+        "ports/chrono/tests/test_m23_promotion.py"
+      ],
+      "support_files": [
+        "ports/chrono/references/m23-promotion-v1.json",
+        "framework/catalog/ports-v1.json",
+        "framework/catalog/port-checks-v1.tsv"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "chrono-m24-closure",
+      "class": "pure",
+      "command": [
+        "python3",
+        "-B",
+        "ports/chrono/tests/test_m24_closure.py"
+      ],
+      "sources": [
+        "ports/chrono/tests/test_m24_closure.py"
+      ],
+      "support_files": [
+        "ports/chrono/references/m24-closure-v1.json"
+      ],
+      "logged": true,
+      "automatic": true,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxloader-armv7-physical",
+      "class": "hardware",
+      "command": null,
+      "sources": [
+        "framework/nxloader/tests/test_armv7_cache_sync.c"
+      ],
+      "logged": true,
+      "automatic": false,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "nxinput-native",
+      "class": "hardware",
+      "command": null,
+      "sources": [
+        "framework/nxinput/tests/test_nxinput.c"
+      ],
+      "logged": true,
+      "automatic": false,
+      "namespace_required": false,
+      "signals": []
+    },
+    {
+      "id": "chrono-device-pilot",
+      "class": "hardware",
+      "command": null,
+      "sources": [],
+      "logged": true,
+      "automatic": false,
+      "namespace_required": false,
+      "signals": []
+    }
+  ]
+}
