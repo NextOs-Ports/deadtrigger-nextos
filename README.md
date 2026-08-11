@@ -7,6 +7,18 @@ Independent AArch64 Linux compatibility port for **Dead Trigger 1 v2.1.0**
 BYO-data: no APK, Android library, Unity asset, artwork, audio or save is
 included.
 
+## Screenshots
+
+Captured straight off a real handheld running this port at 1280×720 — real
+hardware, no upscaling or mock-ups:
+
+| | |
+|---|---|
+| ![Gameplay HUD](screenshots/01-gameplay-hud.png) | ![Heal prompt](screenshots/02-gameplay-heal.png) |
+| ![Mission briefing](screenshots/03-mission-briefing.png) | |
+
+---
+
 ## Community
 
 Questions, bug reports, help getting the port running, and news about the next ones:
