@@ -94,6 +94,7 @@ static il2cpp_field_static_get_value_fn g_field_static_get_value;
 static void *g_field_sensitivity;
 static void *g_field_default_sensitivity;
 static int g_fire_sticky_up = 1;
+static int g_fire_level_down = 1;
 static int g_padlog;
 
 static int g_install_state;
@@ -124,12 +125,15 @@ static void gamepad_env_init(void) {
         g_view_sens_y = strtof(setting, NULL);
     if ((setting = getenv("DT_FIRE_STICKY")))
         g_fire_sticky_up = atoi(setting) != 0;
+    if ((setting = getenv("DT_FIRE_LEVEL")))
+        g_fire_level_down = atoi(setting) != 0;
     g_padlog = getenv("DT_PADLOG") != NULL;
     fprintf(stderr,
             "[gamepad] look_scale=%.2f look_expo=%.2f "
-            "view_sens=%.1f/%.1f fire_sticky=%d\n",
+            "view_sens=%.1f/%.1f fire_sticky=%d fire_level=%d\n",
             g_look_scale, g_look_expo,
-            g_view_sens_x, g_view_sens_y, g_fire_sticky_up);
+            g_view_sens_x, g_view_sens_y, g_fire_sticky_up,
+            g_fire_level_down);
 }
 
 static uint32_t float_bits(float value) {
@@ -235,8 +239,25 @@ static uint8_t hooked_button_down(uintptr_t arg0, uintptr_t arg1,
     if (input < 0 || input > DT_INPUT_ACTION)
         return 0;
     uint32_t bit = 1u << input;
-    if (!(g_down_latch & bit))
+    if (!(g_down_latch & bit)) {
+        /*
+         * Fire must be level-driven, not edge-driven: ActionBeginFire sets
+         * Desires.WeaponTriggerOn only when CanFire() is true at that exact
+         * press, and CanFire() is false during the whole reload. A single
+         * consumed edge therefore dies silently when the pull lands during
+         * a reload (or the pull predates it), leaving the weapon mute until
+         * a lucky re-press — the "gun frozen after reload" bug. Re-asserting
+         * the press every frame the trigger is physically held is safe:
+         * ActionBeginFire only performs idempotent state writes behind the
+         * CanFire() gate, so firing resumes on the first Ready frame.
+         */
+        if (input == DT_INPUT_FIRE && g_fire_level_down &&
+            (g_frame_level & bit)) {
+            g_fire_down_delivered = 1;
+            return 1;
+        }
         return 0;
+    }
     g_down_read |= bit;
     if (input == DT_INPUT_FIRE)
         g_fire_down_delivered = 1;

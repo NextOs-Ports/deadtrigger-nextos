@@ -232,7 +232,7 @@ def check_elf() -> None:
 
 def check_release() -> None:
     release = load_json(PORT / "nxrelease.json")
-    require(release["package"]["version"] == "1.0.4",
+    require(release["package"]["version"] == "1.0.5",
             "release version drift")
     require(release["package"]["launcher_contract"]["config_sha256"] ==
             sha256(PORT / "nxport.json"), "nxport release pin stale")

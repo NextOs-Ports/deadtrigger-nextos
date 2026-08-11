@@ -3,7 +3,7 @@
   "source_root": ".",
   "package": {
     "id": "deadtrigger",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "profile": "universal-portmaster",
     "launcher": "Dead Trigger.sh",
     "launcher_chain": [
@@ -125,7 +125,7 @@
       "architecture": "aarch64",
       "build_profile": "universal-low-glibc",
       "provenance": "build_universal.sh; pinned AArch64 GCC 16.1.0 objects with Buster libc headers; pinned offline Debian Buster image sha256:036c7910ea53bc78cc213452afa92fa83d55de1c51ae54f315af58b5a41a45cf for link and strip",
-      "sha256": "325fc2a2f46a0dd3a996719039da07735261286d028c27e0c4c26e40050ec1e9",
+      "sha256": "08a4151faeae58e59b19b65cd07bb7b22df38ffa2b42453eba8e4bdbc93a5219",
       "needed": [
         "libEGL.so",
         "libGLESv2.so",
@@ -179,7 +179,7 @@
       "target": "deadtrigger/version.txt",
       "kind": "payload",
       "mode": "0644",
-      "sha256": "d1b77b88f4b9f675a900e4143ac768a21218623cfe1703ca43162388c3271bd6"
+      "sha256": "8c54bfab7f1ae9bd1a7148eae41e7b0a8f4ad3726e0cac70f823a2d45db9e60c"
     },
     {
       "source": "gamedata/README.txt",

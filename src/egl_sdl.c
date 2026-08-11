@@ -12,7 +12,9 @@
 #include <SDL2/SDL.h>
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
+#include <errno.h>
 #include <pthread.h>
+#include <time.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -606,12 +608,55 @@ static EGLBoolean sdl_eglQueryContext(EGLDisplay display, EGLContext handle,
     return EGL_TRUE;
 }
 
+/*
+ * The 2023 remaster targets 60 fps and all gameplay is deltaTime-based, so
+ * the game literally runs twice the approved NextOS pacing on panels whose
+ * vsync it can reach (Mali-G31/muOS reports: "zombies too fast"). The
+ * original 2012 release ran at 30 fps and that is the pacing the NextOS
+ * validated on the Mali-450 (~25 fps), so the swap path paces every device
+ * to the same ceiling. Sleeping before the flip keeps vsync engaged; the
+ * deadline advances by whole periods so a slow frame never causes a burst.
+ */
+static void frame_cap_pace(void)
+{
+    static long period_ns = -1;
+    static struct timespec deadline;
+    if (period_ns < 0) {
+        long cap = 30;
+        const char *setting = getenv("DT_FPS_CAP");
+        if (setting)
+            cap = strtol(setting, NULL, 10);
+        period_ns = cap > 0 ? 1000000000L / cap : 0;
+        if (period_ns)
+            dt_video_log("frame cap %ld fps", cap);
+        clock_gettime(CLOCK_MONOTONIC, &deadline);
+    }
+    if (!period_ns)
+        return;
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    if (now.tv_sec > deadline.tv_sec ||
+        (now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec)) {
+        deadline = now;
+    } else {
+        while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME,
+                               &deadline, NULL) == EINTR)
+            ;
+    }
+    deadline.tv_nsec += period_ns;
+    if (deadline.tv_nsec >= 1000000000L) {
+        deadline.tv_nsec -= 1000000000L;
+        deadline.tv_sec += 1;
+    }
+}
+
 EGLBoolean dt_sdl_swap_buffers(EGLDisplay display, EGLSurface handle)
 {
     (void)display;
     if (!current_context || current_context->draw != handle ||
         current_context->is_pbuffer)
         return EGL_TRUE;
+    frame_cap_pace();
     SDL_GL_SwapWindow(video_window);
     frame_count++;
     if (frame_count <= 3 || frame_count % 600 == 0)
