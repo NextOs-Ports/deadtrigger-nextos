@@ -101,6 +101,215 @@ static int g_install_state;
 static unsigned g_install_attempts;
 static atomic_ullong g_gameplay_axis_millis;
 
+/*
+ * DT_FIRELOG=1: diagnostic sampling of every gate that can silence the
+ * trigger (post-auto-reload "mute gun" report). Reads the game's own
+ * state via il2cpp metadata on the frames the game polls ButtonDown(FIRE)
+ * and prints transitions only. Never enabled by the release launcher.
+ */
+typedef size_t (*il2cpp_field_get_offset_fn)(void *);
+typedef uint8_t (*m_bool_fn)(void *, void *);
+typedef void *(*m_obj_fn)(void *, void *);
+typedef int32_t (*m_int_fn)(void *, void *);
+
+static void *find_class(dt_module *il2cpp, const char *class_name);
+static void *find_method(dt_module *il2cpp, const char *class_name,
+                         const char *method_name, int parameter_count);
+static uint64_t monotonic_milliseconds(void);
+static int replace_method_body(dt_module *il2cpp, const void *method,
+                               void *replacement, const char *name);
+
+static int g_firelog;
+static il2cpp_field_static_get_value_fn g_fl_static_get;
+static il2cpp_field_get_offset_fn g_fl_field_offset;
+static void *g_fl_player_instance;   /* FieldInfo Player.Instance (static) */
+static m_bool_fn g_fl_canfire;
+static m_bool_fn g_fl_isbusy;
+static m_obj_fn g_fl_getcurweapon;
+static m_int_fn g_fl_clipammo;
+static size_t g_fl_off_owner;        /* ComponentPlayer.<Owner>k__BackingField */
+static size_t g_fl_off_bb;           /* AgentHuman.BlackBoard */
+static size_t g_fl_off_wcomp;        /* AgentHuman.<WeaponComponent>k__BackingField */
+static size_t g_fl_off_busyaction;   /* BlackBoard.BusyAction */
+static size_t g_fl_off_actionpoint;  /* BlackBoard.ActionPointOn */
+static size_t g_fl_off_stop;         /* BlackBoard.<Stop>k__BackingField */
+static int g_fl_ready;
+
+static void *fl_read_ptr(void *obj, size_t offset) {
+    return obj && offset ? *(void **)((char *)obj + offset) : NULL;
+}
+
+static uint8_t fl_read_bool(void *obj, size_t offset) {
+    return obj && offset ? *(uint8_t *)((char *)obj + offset) : 0;
+}
+
+static void firelog_sample(int held) {
+    if (!g_fl_ready)
+        return;
+    void *player = NULL;
+    g_fl_static_get(g_fl_player_instance, &player);
+    if (!player)
+        return;
+    void *owner = fl_read_ptr(player, g_fl_off_owner);
+    if (!owner)
+        return;
+    void *bb = fl_read_ptr(owner, g_fl_off_bb);
+    void *wcomp = fl_read_ptr(owner, g_fl_off_wcomp);
+    void *weapon = wcomp ? g_fl_getcurweapon(wcomp, NULL) : NULL;
+    unsigned state =
+        (held ? 1u : 0u) |
+        ((unsigned)(g_fl_canfire(owner, NULL) & 1) << 1) |
+        ((weapon && g_fl_isbusy(weapon, NULL)) ? 4u : 0u) |
+        ((unsigned)(fl_read_bool(bb, g_fl_off_busyaction) & 1) << 3) |
+        ((unsigned)(fl_read_bool(bb, g_fl_off_actionpoint) & 1) << 4) |
+        ((unsigned)(fl_read_bool(bb, g_fl_off_stop) & 1) << 5);
+    int clip = weapon ? g_fl_clipammo(weapon, NULL) : -1;
+    static unsigned last_state = ~0u;
+    static int last_clip = -2;
+    if (state == last_state && clip == last_clip)
+        return;
+    last_state = state;
+    last_clip = clip;
+    fprintf(stderr,
+            "[firelog] %llu held=%u canfire=%u clip=%d wbusy=%u "
+            "bbBusyAction=%u bbActionPoint=%u bbStop=%u\n",
+            (unsigned long long)monotonic_milliseconds(),
+            state & 1, (state >> 1) & 1, clip, (state >> 2) & 1,
+            (state >> 3) & 1, (state >> 4) & 1, (state >> 5) & 1);
+}
+
+/*
+ * Post-auto-reload mute fix. The game arms the weapon's Busy deadline twice
+ * per reload: WeaponBase.Reload() with the WeaponSettings TimeReload and the
+ * AnimState handler with the actual animation length; the later call wins.
+ * Measured live on device: every normal reload ends busy after ~1.65 s, but
+ * the first auto-reload keeps a ~3.24 s deadline because the two calls land
+ * in the opposite order, leaving the long value in place — the "gun mute for
+ * 2-5 s after the reload animation" report. SetBusy is reimplemented
+ * faithfully (Busy = TimeManager.timeSinceLevelLoad + t) with one guard: a
+ * call that would EXTEND a still-active long deadline set moments before on
+ * the same weapon is ignored, so whichever order the two reload writes
+ * arrive in, the shorter one rules. Fire-rate SetBusy calls always start
+ * from an expired deadline (CanFire gate) and are never refused.
+ */
+static m_obj_fn g_sb_get_instance;      /* TimeManager.get_Instance */
+typedef float (*m_float_fn)(void *, void *);
+static m_float_fn g_sb_get_time;        /* get_timeSinceLevelLoad */
+static size_t g_sb_off_busy;            /* WeaponBase.Busy */
+static int g_busy_guard = 1;
+
+static void hooked_set_busy(void *weapon, float busy_time) {
+    static void *previous_weapon;
+    static uint64_t previous_millis;
+    if (!weapon)
+        return;
+    float now = 0.0f;
+    void *manager = g_sb_get_instance ? g_sb_get_instance(NULL, NULL) : NULL;
+    if (manager && g_sb_get_time)
+        now = g_sb_get_time(manager, NULL);
+    float *busy = (float *)((char *)weapon + g_sb_off_busy);
+    float end = now + busy_time;
+    uint64_t millis = monotonic_milliseconds();
+    int refused = g_busy_guard && weapon == previous_weapon &&
+                  millis - previous_millis < 250u &&
+                  *busy - now > 0.5f && end > *busy;
+    if (!refused)
+        *busy = end;
+    if (g_firelog)
+        fprintf(stderr,
+                "[firelog] SetBusy t=%.3f now=%.3f cur_end=%.3f%s\n",
+                (double)busy_time, (double)now, (double)*busy,
+                refused ? " (raise recusado)" : "");
+    previous_weapon = weapon;
+    previous_millis = millis;
+}
+
+static void busy_guard_install(dt_module *il2cpp) {
+    il2cpp_class_get_field_from_name_fn class_get_field =
+        (il2cpp_class_get_field_from_name_fn)
+        dt_module_symbol(il2cpp, "il2cpp_class_get_field_from_name");
+    il2cpp_field_get_offset_fn field_offset = (il2cpp_field_get_offset_fn)
+        dt_module_symbol(il2cpp, "il2cpp_field_get_offset");
+    const void *set_busy = find_method(il2cpp, "WeaponBase", "SetBusy", 1);
+    const void *get_instance =
+        find_method(il2cpp, "TimeManager", "get_Instance", 0);
+    const void *get_time =
+        find_method(il2cpp, "TimeManager", "get_timeSinceLevelLoad", 0);
+    void *weapon_class = find_class(il2cpp, "WeaponBase");
+    void *busy_field = weapon_class && class_get_field
+        ? class_get_field(weapon_class, "Busy") : NULL;
+    if (!set_busy || !get_instance || !get_time || !busy_field ||
+        !field_offset) {
+        fprintf(stderr,
+                "[gamepad] aviso: SetBusy/TimeManager ausentes — janela de "
+                "reload segue o jogo\n");
+        return;
+    }
+    g_sb_get_instance = (m_obj_fn)*(const uintptr_t *)get_instance;
+    g_sb_get_time = (m_float_fn)*(const uintptr_t *)get_time;
+    g_sb_off_busy = field_offset(busy_field);
+    if (replace_method_body(il2cpp, set_busy, (void *)&hooked_set_busy,
+                            "SetBusy"))
+        fprintf(stderr,
+                "[gamepad] SetBusy com guarda anti-extensao instalado "
+                "(fix reload 1a recarga)\n");
+    else
+        g_sb_get_instance = NULL;
+}
+
+static void firelog_install(dt_module *il2cpp) {
+    if (!g_firelog)
+        return;
+    il2cpp_class_get_field_from_name_fn class_get_field =
+        (il2cpp_class_get_field_from_name_fn)
+        dt_module_symbol(il2cpp, "il2cpp_class_get_field_from_name");
+    g_fl_static_get = (il2cpp_field_static_get_value_fn)
+        dt_module_symbol(il2cpp, "il2cpp_field_static_get_value");
+    g_fl_field_offset = (il2cpp_field_get_offset_fn)
+        dt_module_symbol(il2cpp, "il2cpp_field_get_offset");
+    void *c_player = find_class(il2cpp, "Player");
+    void *c_component = find_class(il2cpp, "ComponentPlayer");
+    void *c_agent = find_class(il2cpp, "AgentHuman");
+    void *c_bb = find_class(il2cpp, "BlackBoard");
+    const void *m_canfire = find_method(il2cpp, "AgentHuman", "CanFire", 0);
+    const void *m_curweap =
+        find_method(il2cpp, "ComponentWeapons", "GetCurrentWeapon", 0);
+    const void *m_clip = find_method(il2cpp, "WeaponBase", "get_ClipAmmo", 0);
+    const void *m_busy = find_method(il2cpp, "WeaponBase", "IsBusy", 0);
+    if (!class_get_field || !g_fl_static_get || !g_fl_field_offset ||
+        !c_player || !c_component || !c_agent || !c_bb ||
+        !m_canfire || !m_curweap || !m_clip || !m_busy) {
+        fprintf(stderr, "[firelog] metadata incompleta; log desativado\n");
+        return;
+    }
+    g_fl_player_instance = class_get_field(c_player, "Instance");
+    void *f_owner = class_get_field(c_component, "<Owner>k__BackingField");
+    void *f_bb = class_get_field(c_agent, "BlackBoard");
+    void *f_wcomp =
+        class_get_field(c_agent, "<WeaponComponent>k__BackingField");
+    void *f_busyaction = class_get_field(c_bb, "BusyAction");
+    void *f_actionpoint = class_get_field(c_bb, "ActionPointOn");
+    void *f_stop = class_get_field(c_bb, "<Stop>k__BackingField");
+    if (!g_fl_player_instance || !f_owner || !f_bb || !f_wcomp ||
+        !f_busyaction || !f_actionpoint || !f_stop) {
+        fprintf(stderr, "[firelog] campos ausentes; log desativado\n");
+        return;
+    }
+    g_fl_off_owner = g_fl_field_offset(f_owner);
+    g_fl_off_bb = g_fl_field_offset(f_bb);
+    g_fl_off_wcomp = g_fl_field_offset(f_wcomp);
+    g_fl_off_busyaction = g_fl_field_offset(f_busyaction);
+    g_fl_off_actionpoint = g_fl_field_offset(f_actionpoint);
+    g_fl_off_stop = g_fl_field_offset(f_stop);
+    g_fl_canfire = (m_bool_fn)*(const uintptr_t *)m_canfire;
+    g_fl_getcurweapon = (m_obj_fn)*(const uintptr_t *)m_curweap;
+    g_fl_clipammo = (m_int_fn)*(const uintptr_t *)m_clip;
+    g_fl_isbusy = (m_bool_fn)*(const uintptr_t *)m_busy;
+    g_fl_ready = 1;
+    fprintf(stderr, "[firelog] gates instalados (CanFire/BusyAction/"
+            "ActionPoint/Stop/IsBusy/ClipAmmo)\n");
+}
+
 static uint64_t monotonic_milliseconds(void) {
     struct timespec value;
     if (clock_gettime(CLOCK_MONOTONIC, &value) != 0)
@@ -128,6 +337,9 @@ static void gamepad_env_init(void) {
     if ((setting = getenv("DT_FIRE_LEVEL")))
         g_fire_level_down = atoi(setting) != 0;
     g_padlog = getenv("DT_PADLOG") != NULL;
+    g_firelog = getenv("DT_FIRELOG") != NULL;
+    if ((setting = getenv("DT_BUSY_GUARD")))
+        g_busy_guard = atoi(setting) != 0;
     fprintf(stderr,
             "[gamepad] look_scale=%.2f look_expo=%.2f "
             "view_sens=%.1f/%.1f fire_sticky=%d fire_level=%d\n",
@@ -239,6 +451,8 @@ static uint8_t hooked_button_down(uintptr_t arg0, uintptr_t arg1,
     if (input < 0 || input > DT_INPUT_ACTION)
         return 0;
     uint32_t bit = 1u << input;
+    if (input == DT_INPUT_FIRE && g_firelog)
+        firelog_sample((g_frame_level & bit) != 0);
     if (!(g_down_latch & bit)) {
         /*
          * Fire must be level-driven, not edge-driven: ActionBeginFire sets
@@ -606,6 +820,9 @@ void dt_gamepad_try_install(void) {
     fprintf(stderr,
             "[gamepad] GuiMogaPopup neutralizado (%d/2 metodos)\n",
             moga_neutered);
+
+    busy_guard_install(il2cpp);
+    firelog_install(il2cpp);
 
     g_install_state = 1;
     fprintf(stderr,

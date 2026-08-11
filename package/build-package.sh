@@ -15,7 +15,7 @@ NXRELEASE_VERSION=0.2.5
 NXRELEASE_SHA256=097ef954261d7e31fb4a759caf2ebda9be02f069b1968e3f7b379d92f51e732f
 MANIFEST="$PORT_DIR/nxrelease.json"
 DESTINATION=${1:-"$PORT_DIR/.build/release"}
-ARCHIVE_NAME=DeadTrigger.NextOS-v1.0.5-FINAL.zip
+ARCHIVE_NAME=DeadTrigger.NextOS-v1.0.6-FINAL.zip
 
 fail() { printf 'deadtrigger package error: %s\n' "$*" >&2; exit 1; }
 

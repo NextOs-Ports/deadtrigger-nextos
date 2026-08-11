@@ -756,9 +756,8 @@ static int run_ui_loop(pthread_t unity_thread) {
         int start_down = merged_button(SDL_CONTROLLER_BUTTON_START);
         int select_down = merged_button(SDL_CONTROLLER_BUTTON_BACK);
         if (start_down && select_down) {
-            if (!exit_chord_since)
+            if (!exit_chord_since) {
                 exit_chord_since = now;
-            else if (now - exit_chord_since >= 750) {
                 fprintf(stderr, "[input] Start+Select: encerrando\n");
                 atomic_store(&g_quit, 1);
             }
