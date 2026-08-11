@@ -487,9 +487,12 @@ static int run_ui_loop(pthread_t unity_thread) {
     uint64_t next_cursor_touch = 0;
     int previous_r3_down = 0;
     int r3_press_pending = 0;
+    int previous_a_down = 0;
+    int a_press_pending = 0;
     int previous_b_down = 0;
     int b_press_pending = 0;
     int b_release_pending = 0;
+    const char *cursor_touch_source = "R3";
     dt_cursor_update(cursor_x, cursor_y, any_pad() && cursor_active);
 
     float test_left_x = 0.0f, test_left_y = 0.0f;
@@ -569,7 +572,9 @@ static int run_ui_loop(pthread_t unity_thread) {
                     (SDL_GameControllerButton)event.cbutton.button;
                 if (button == SDL_CONTROLLER_BUTTON_RIGHTSTICK && pressed)
                     r3_press_pending = 1;
-                else if (button == SDL_CONTROLLER_BUTTON_B) {
+                if (button == SDL_CONTROLLER_BUTTON_A && pressed)
+                    a_press_pending = 1;
+                if (button == SDL_CONTROLLER_BUTTON_B) {
                     if (pressed)
                         b_press_pending = 1;
                     else
@@ -615,16 +620,23 @@ static int run_ui_loop(pthread_t unity_thread) {
         int r3_down = merged_button(SDL_CONTROLLER_BUTTON_RIGHTSTICK);
         int r3_pressed = r3_press_pending ||
                          (r3_down && !previous_r3_down);
+        int a_down = merged_button(SDL_CONTROLLER_BUTTON_A);
+        int a_pressed = a_press_pending ||
+                        (a_down && !previous_a_down);
         r3_press_pending = 0;
+        a_press_pending = 0;
         previous_r3_down = r3_down;
-        if (cursor_active && r3_pressed && !cursor_touch_stage) {
+        previous_a_down = a_down;
+        if (cursor_active && (r3_pressed || a_pressed) &&
+            !cursor_touch_stage) {
+            cursor_touch_source = r3_pressed ? "R3" : "A/Cross";
             int consumed = inject_touch(0, cursor_x, cursor_y);
             cursor_touch_stage = 1;
             next_cursor_touch = now + 40;
             last_cursor_activity = now;
             fprintf(stderr,
-                    "[input] R3 toque DOWN (%.0f, %.0f) consumido=%d\n",
-                    cursor_x, cursor_y, consumed);
+                    "[input] %s toque DOWN (%.0f, %.0f) consumido=%d\n",
+                    cursor_touch_source, cursor_x, cursor_y, consumed);
         }
 
         int b_down = merged_button(SDL_CONTROLLER_BUTTON_B);
@@ -747,8 +759,8 @@ static int run_ui_loop(pthread_t unity_thread) {
                 ++cursor_touch_stage;
             } else {
                 inject_touch(1, cursor_x, cursor_y);
-                fprintf(stderr, "[input] R3 toque UP (%.0f, %.0f)\n",
-                        cursor_x, cursor_y);
+                fprintf(stderr, "[input] %s toque UP (%.0f, %.0f)\n",
+                        cursor_touch_source, cursor_x, cursor_y);
                 cursor_touch_stage = 0;
             }
             next_cursor_touch = now + 40;

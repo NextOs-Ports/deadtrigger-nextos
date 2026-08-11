@@ -52,6 +52,62 @@ static int pad_ord_abs_rank(const unsigned long *absb, int code) {
     return r;
 }
 
+static int pad_ord_button_is(SDL_GameController *controller,
+                             SDL_GameControllerButton button,
+                             int raw_button) {
+    SDL_GameControllerButtonBind binding =
+        SDL_GameControllerGetBindForButton(controller, button);
+    return binding.bindType == SDL_CONTROLLER_BINDTYPE_BUTTON &&
+           binding.value.button == raw_button;
+}
+
+static int pad_ord_axis_is_button(SDL_GameController *controller,
+                                  SDL_GameControllerAxis axis,
+                                  int raw_button) {
+    SDL_GameControllerButtonBind binding =
+        SDL_GameControllerGetBindForAxis(controller, axis);
+    return binding.bindType == SDL_CONTROLLER_BINDTYPE_BUTTON &&
+           binding.value.button == raw_button;
+}
+
+/* The canonical PortMaster handheld topology is already positional and must
+ * win over the old hid-generic ordinal heuristic. Match the whole capability
+ * shape, never controller identity, so a partial or unrelated map still falls
+ * through to the proven old-kernel repair below. */
+static int pad_ord_has_complete_portmaster_layout(int index) {
+    SDL_GameController *controller;
+    SDL_Joystick *joystick;
+    int complete;
+
+    if (!SDL_IsGameController(index))
+        return 0;
+    controller = SDL_GameControllerOpen(index);
+    if (!controller)
+        return 0;
+    joystick = SDL_GameControllerGetJoystick(controller);
+    complete = joystick && SDL_JoystickNumButtons(joystick) >= 12 &&
+        pad_ord_button_is(controller, SDL_CONTROLLER_BUTTON_A, 1) &&
+        pad_ord_button_is(controller, SDL_CONTROLLER_BUTTON_B, 0) &&
+        pad_ord_button_is(controller, SDL_CONTROLLER_BUTTON_X, 3) &&
+        pad_ord_button_is(controller, SDL_CONTROLLER_BUTTON_Y, 2) &&
+        pad_ord_button_is(
+            controller, SDL_CONTROLLER_BUTTON_LEFTSHOULDER, 4) &&
+        pad_ord_button_is(
+            controller, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, 5) &&
+        pad_ord_button_is(controller, SDL_CONTROLLER_BUTTON_START, 6) &&
+        pad_ord_button_is(controller, SDL_CONTROLLER_BUTTON_BACK, 7) &&
+        pad_ord_button_is(
+            controller, SDL_CONTROLLER_BUTTON_LEFTSTICK, 8) &&
+        pad_ord_button_is(
+            controller, SDL_CONTROLLER_BUTTON_RIGHTSTICK, 9) &&
+        pad_ord_axis_is_button(
+            controller, SDL_CONTROLLER_AXIS_TRIGGERLEFT, 10) &&
+        pad_ord_axis_is_button(
+            controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT, 11);
+    SDL_GameControllerClose(controller);
+    return complete;
+}
+
 static void pad_ordinal_fix_apply(int index, const char *env_prefix) {
     char envname[64];
     snprintf(envname, sizeof(envname), "%s_ORDINAL_FIX", env_prefix);
@@ -60,6 +116,12 @@ static void pad_ordinal_fix_apply(int index, const char *env_prefix) {
     snprintf(envname, sizeof(envname), "%s_PAD_MAP", env_prefix);
     const char *usermap = getenv(envname);
     if (usermap && *usermap) return;   /* mapping manual tem prioridade */
+    if (pad_ord_has_complete_portmaster_layout(index)) {
+        fprintf(stderr,
+                "[pad] ordinal fix ignorado: mapping PortMaster completo "
+                "confirmado por capacidades\n");
+        return;
+    }
 
     SDL_JoystickGUID guid = SDL_JoystickGetDeviceGUID(index);
     int vid = guid.data[4] | (guid.data[5] << 8);

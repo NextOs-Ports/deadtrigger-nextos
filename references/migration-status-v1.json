@@ -2,10 +2,11 @@
   "schema": "deadtrigger-migration-status-v1",
   "schema_version": 1,
   "port_id": "deadtrigger",
-  "release_version": "1.0.2",
+  "release_version": "1.0.7",
   "framework": {
     "nxport_schema": 2,
-    "nxbootstrap": "0.6.3",
+    "nxbootstrap": "0.6.4",
+    "nxinput": "0.2.0",
     "nxextract": "1.2.6",
     "nxrelease": "0.2.5"
   },

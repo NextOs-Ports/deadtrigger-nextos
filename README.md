@@ -29,7 +29,7 @@ Questions, bug reports, help getting the port running, and news about the next o
 
 ### Status and supported payload
 
-Release 1.0.2 supports the universal Android package:
+Release 1.0.7 supports the universal Android package:
 
 ```text
 package: com.madfingergames.deadtrigger
@@ -55,10 +55,11 @@ the following mission and the native focus-loss/pause exit flow.
 
 ### Architecture and native flow
 
-`Dead Trigger.sh` is a self-contained nxbootstrap 0.6.3 launcher. It prepares
-PortMaster, runs NXExtract before the guest, verifies all required payload
-files, applies only private runtime library paths, prevents double launch and
-returns control to the frontend on exit.
+`Dead Trigger.sh` is a self-contained nxbootstrap 0.6.4 launcher. It searches
+the supported PortMaster roots for a real `control.txt` (including the NextOS
+configuration root), calls `get_controls`, runs NXExtract before the guest,
+verifies all required payload files, applies only private runtime library
+paths, prevents double launch and returns control to the frontend on exit.
 
 The host reproduces the original order:
 
@@ -101,8 +102,10 @@ on the game's semantic input path. Touch menus get a polished arrow:
 
 - right stick moves it with radial deadzone, progressive response, smoothing
   and frame-time-independent motion;
-- R3 clicks in menu context;
-- A, D-pad and left stick are never stolen from native input;
+- R3 or A/Cross clicks in menu context;
+- A/Cross is still published on the game's native semantic path; the menu
+  adapter only mirrors its press to the paired touch click;
+- D-pad and left stick are never stolen from native input;
 - when the game consumes `PlayerControlsGamepad` axes, the arrow disappears
   automatically and the right stick returns to native camera/aim;
 - `SELECT + START` held briefly requests a graceful exit.
@@ -114,10 +117,14 @@ Unity's occasionally unnormalized absolute semaphore deadline is carried into
 valid seconds/nanoseconds before the glibc wait, preserving the Android timing
 while preventing a CPU spin during mission transitions.
 
-If an older SDL database exposes the classic physical 12-button layout but
-omits L2, R2 or R3 semantics, the adapter recovers only those missing controls
-from the proven raw capabilities. Complete mappings remain unchanged, and no
-device name, GUID, firmware or graphics backend is used as policy.
+nxinput 0.2.0 first preserves the real PortMaster mapping. In standalone
+layouts, it can repair the exact contradicted topology seen in the field:
+face buttons `b0..b3`, shoulders `b4/b5`, Start/Back `b6/b7`, L3 `b8`, R3
+mislabelled as `guide:b9`, triggers `b10/b11` and four declared stick axes.
+Only that complete capability signature is normalized to PortMaster face
+semantics and R3; near misses and complete mappings remain unchanged. The
+older classic 12-button L2/R2/R3 recovery remains adapter-local. Neither path
+selects by device name, GUID, VID/PID, firmware or graphics backend.
 
 ### Owner-data installation
 
@@ -169,7 +176,7 @@ See `NOTICE.md`.
 ### Estado e versão
 
 Este port independente executa **Dead Trigger 1 v2.1.0 (210000062)** em Linux
-AArch64 seguindo o fluxo Android/Unity real. A release 1.0.2 foi validada no
+AArch64 seguindo o fluxo Android/Unity real. O baseline foi validado no
 Mali-450 por framebuffer, no X5M por KMSDRM/Mali-G310 e no Ark por
 KMSDRM/Mali-G31.
 
@@ -181,9 +188,11 @@ seguinte e saída pelo fluxo nativo de perda de foco/pause.
 
 ### Framework, dados e controles
 
-`Dead Trigger.sh` é o launcher autossuficiente do nxbootstrap 0.6.3. Ele roda o
-extrator antes do jogo, valida arquivos obrigatórios, impede duas instâncias e
-isola as bibliotecas privadas. O loader preserva `libmain`, `JNI_OnLoad`,
+`Dead Trigger.sh` é o launcher autossuficiente do nxbootstrap 0.6.4. Ele procura
+um `control.txt` real em todas as raízes PortMaster suportadas, incluindo a
+raiz de configuração do NextOS, chama `get_controls`, roda o extrator antes do
+jogo, valida arquivos obrigatórios, impede duas instâncias e isola as
+bibliotecas privadas. O loader preserva `libmain`, `JNI_OnLoad`,
 `NativeLoader`, `libunity`, `libil2cpp`, `initJni`, surface, foco, resume e
 PlayerLoop na ordem original.
 
@@ -192,15 +201,21 @@ confere o pacote, 1.441 arquivos/306.315.658 bytes e os hashes das três
 bibliotecas ARM64 antes de publicar `assets/` e `lib/`. O APK não é apagado e
 um payload incorreto não substitui uma instalação boa.
 
-Nos menus, apenas o analógico direito move a seta e R3 clica. A seta tem
-deadzone radial, resposta progressiva e suavização por tempo. A, D-pad e
-analógico esquerdo continuam nativos. Quando o próprio
+Nos menus, apenas o analógico direito move a seta; R3 ou A/Cross clica. A seta
+tem deadzone radial, resposta progressiva e suavização por tempo. A/Cross
+continua publicado também na ação semântica nativa — o adapter apenas espelha
+o press para o toque enquanto o menu está ativo. D-pad e analógico esquerdo
+continuam nativos. Quando o próprio
 `PlayerControlsGamepad` comprova gameplay, a seta some e o direito volta para
 câmera/mira. `SELECT + START` pede saída limpa.
 
-Mapeamentos SDL antigos que expõem o layout físico clássico de 12 botões, mas
-omitem L2, R2 ou R3, têm somente essas funções ausentes recuperadas por
-capacidade. A correção não depende de aparelho, GUID, firmware ou backend. O
+O nxinput 0.2.0 respeita primeiro o mapping real do PortMaster. Se ele estiver
+ausente, somente a assinatura completa observada — face `b0..b3`, shoulders
+`b4/b5`, Start/Back `b6/b7`, L3 `b8`, R3 incorretamente em `guide:b9`,
+gatilhos `b10/b11` e quatro eixos — pode ser normalizada para a ordem do
+PortMaster e R3. Qualquer combinação parcial fica intocada. Mapeamentos SDL
+antigos do layout clássico ainda têm L2/R2/R3 ausentes recuperados pelo adapter.
+Nenhuma correção depende de aparelho, GUID, VID/PID, firmware ou backend. O
 prazo absoluto ocasionalmente inválido do Unity também é normalizado antes da
 espera glibc, evitando o loop de CPU nas transições entre missões.
 

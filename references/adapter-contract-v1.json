@@ -36,9 +36,10 @@
   "input": {
     "implementation": "metadata-resolved-PlayerControlsGamepad",
     "menu_cursor": "right-stick-radial-progressive-smoothed",
-    "menu_click": "R3",
+    "menu_click": "R3-or-A-Cross-touch-mirror",
+    "menu_click_preserves_native_a": true,
     "gameplay_context": "observed-native-axis-consumption",
-    "incomplete_mapping_recovery": "capability-based-L2-R2-R3"
+    "incomplete_mapping_recovery": "nxinput-exact-topology-face-R3-plus-adapter-classic-L2-R2-R3"
   },
   "threading": {
     "unity_absolute_timeout": "normalized-before-glibc-condvar-wait",
