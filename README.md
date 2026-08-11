@@ -11,7 +11,7 @@ included.
 
 ### Status and supported payload
 
-Release 1.0.8 supports the universal Android package:
+Release 1.0.9 supports the universal Android package:
 
 ```text
 package: com.madfingergames.deadtrigger

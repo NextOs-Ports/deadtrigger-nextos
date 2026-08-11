@@ -354,8 +354,17 @@ static void speed_probe_tick(void) {
         g_sp_set_scale(g_time_scale_override, NULL);
         scale = g_time_scale_override;
     }
-    if (g_pace_engaged && fabsf(scale - g_pace_applied) > 0.0005f) {
-        /* The game wrote a new timeScale (slow-mo in/out, pause). Apply the
+    if (g_pace_engaged && scale <= 0.0005f) {
+        /* Frozen: TimeManager.PauseTime() saves the LIVE Time.timeScale into
+         * m_StoredScale and writes 0; UnpauseTime() writes m_StoredScale
+         * back. Compensating the 0 would clear our memory of the running
+         * value, so the restored (already compensated) scale would look like
+         * a fresh intent and get halved again — every pause/resume halved the
+         * pace, and with it the 360*deltaTime view clamp, which is the
+         * "aim gets slower on every pause" report. Leave the freeze alone and
+         * keep g_pace_applied, so the restore matches and is absorbed. */
+    } else if (g_pace_engaged && fabsf(scale - g_pace_applied) > 0.0005f) {
+        /* The game wrote a new timeScale (slow-mo in/out). Apply the
          * proportional compensation to its intent, never on top of our own
          * previous write. */
         float target = scale * g_pace_factor;
