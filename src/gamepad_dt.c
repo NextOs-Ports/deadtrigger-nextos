@@ -115,6 +115,9 @@ typedef int32_t (*m_int_fn)(void *, void *);
 static void *find_class(dt_module *il2cpp, const char *class_name);
 static void *find_method(dt_module *il2cpp, const char *class_name,
                          const char *method_name, int parameter_count);
+static void *find_method_ns(dt_module *il2cpp, const char *name_space,
+                            const char *class_name, const char *method_name,
+                            int parameter_count);
 static uint64_t monotonic_milliseconds(void);
 static int replace_method_body(dt_module *il2cpp, const void *method,
                                void *replacement, const char *name);
@@ -255,6 +258,164 @@ static void busy_guard_install(dt_module *il2cpp) {
                 "(fix reload 1a recarga)\n");
     else
         g_sb_get_instance = NULL;
+}
+
+/*
+ * Speed probe + pace knob for the "zombies 2x" field reports (dArkOSRE,
+ * Mali-G31). Gameplay is deltaTime-driven, so the fps cap cannot change the
+ * wall-clock pace; the only mechanisms that can are the engine clock or
+ * Time.timeScale. DT_SPEEDLOG=1 samples, once per second on the Unity
+ * thread, game-time vs CLOCK_MONOTONIC (ratio), Time.timeScale, deltaTime,
+ * unscaledDeltaTime and the rendered fps, which separates the two.
+ * DT_TIME_SCALE=<x> (0.05..4.0) tames the normal-play timeScale to <x>,
+ * leaving the game's own slow-motion states (<1) untouched. Neither is
+ * enabled by the release launcher.
+ *
+ * Pace governor (DT_PACE=0 disables): measured live on the R36S/ArkOS, the
+ * engine advances SCALED game time by the sum of the LAST TWO frame
+ * intervals per frame (dt = udt(n) + udt(n-1)) while unscaledDeltaTime and
+ * timeScale stay correct — game time runs exactly 2x wall clock at ANY fps,
+ * which is the "zombies too fast" field report and why the fps cap never
+ * changed the pace. The governor never trusts the theory alone: it engages
+ * only after measuring a sustained game-time/wall-time ratio of ~2 with the
+ * game in the normal timeScale=1 state, then applies a proportional 0.5
+ * compensation to EVERY timeScale the game sets (slow-motion keeps its
+ * designed feel: 0.3 -> engine 0.15 -> effective 0.3 real).
+ */
+static m_float_fn g_sp_get_time;      /* UnityEngine.Time.get_time */
+static m_float_fn g_sp_get_delta;     /* get_deltaTime */
+static m_float_fn g_sp_get_unscaled;  /* get_unscaledDeltaTime */
+static m_float_fn g_sp_get_scale;     /* get_timeScale */
+static m_int_fn g_sp_get_framecount;  /* get_frameCount */
+typedef void (*m_set_float_fn)(float, void *);
+static m_set_float_fn g_sp_set_scale; /* set_timeScale */
+static int g_speedlog;
+static float g_time_scale_override;   /* 0 = knob off */
+static int g_sp_ready;
+static int g_pace_enabled = 1;        /* DT_PACE=0 turns the governor off */
+static int g_pace_engaged;            /* 0 = still measuring */
+static int g_pace_hits;               /* consecutive ~2x samples */
+static float g_pace_factor = 0.5f;    /* compensation applied when engaged */
+static float g_pace_applied = -1.0f;  /* last timeScale written by us */
+
+static void speed_probe_install(dt_module *il2cpp) {
+    const char *log_setting = getenv("DT_SPEEDLOG");
+    const char *scale_setting = getenv("DT_TIME_SCALE");
+    const char *pace_setting = getenv("DT_PACE");
+    g_speedlog = log_setting && atoi(log_setting) != 0;
+    g_time_scale_override = scale_setting ? (float)atof(scale_setting) : 0.0f;
+    if (g_time_scale_override < 0.05f || g_time_scale_override > 4.0f)
+        g_time_scale_override = 0.0f;
+    if (pace_setting && atoi(pace_setting) == 0)
+        g_pace_enabled = 0;
+    if (g_time_scale_override > 0.0f)
+        g_pace_enabled = 0;   /* manual knob wins over the governor */
+    if (!g_speedlog && g_time_scale_override == 0.0f && !g_pace_enabled)
+        return;
+    const void *m_time =
+        find_method_ns(il2cpp, "UnityEngine", "Time", "get_time", 0);
+    const void *m_delta =
+        find_method_ns(il2cpp, "UnityEngine", "Time", "get_deltaTime", 0);
+    const void *m_unscaled =
+        find_method_ns(il2cpp, "UnityEngine", "Time",
+                       "get_unscaledDeltaTime", 0);
+    const void *m_scale =
+        find_method_ns(il2cpp, "UnityEngine", "Time", "get_timeScale", 0);
+    const void *m_frames =
+        find_method_ns(il2cpp, "UnityEngine", "Time", "get_frameCount", 0);
+    const void *m_set =
+        find_method_ns(il2cpp, "UnityEngine", "Time", "set_timeScale", 1);
+    if (!m_time || !m_delta || !m_unscaled || !m_scale || !m_frames ||
+        !m_set) {
+        fprintf(stderr,
+                "[speed] aviso: UnityEngine.Time incompleto — sonda "
+                "desligada\n");
+        return;
+    }
+    g_sp_get_time = (m_float_fn)*(const uintptr_t *)m_time;
+    g_sp_get_delta = (m_float_fn)*(const uintptr_t *)m_delta;
+    g_sp_get_unscaled = (m_float_fn)*(const uintptr_t *)m_unscaled;
+    g_sp_get_scale = (m_float_fn)*(const uintptr_t *)m_scale;
+    g_sp_get_framecount = (m_int_fn)*(const uintptr_t *)m_frames;
+    g_sp_set_scale = (m_set_float_fn)*(const uintptr_t *)m_set;
+    g_sp_ready = 1;
+    fprintf(stderr, "[speed] sonda instalada (log=%d timeScale=%.2f)\n",
+            g_speedlog, (double)g_time_scale_override);
+}
+
+static void speed_probe_tick(void) {
+    if (!g_sp_ready)
+        return;
+    float scale = g_sp_get_scale(NULL, NULL);
+    if (g_time_scale_override > 0.0f && scale > 0.999f &&
+        fabsf(scale - g_time_scale_override) > 0.001f) {
+        /* Only the normal-play state is tamed; slow-mo (<1) stays owned by
+         * the game's TimeManager. */
+        g_sp_set_scale(g_time_scale_override, NULL);
+        scale = g_time_scale_override;
+    }
+    if (g_pace_engaged && fabsf(scale - g_pace_applied) > 0.0005f) {
+        /* The game wrote a new timeScale (slow-mo in/out, pause). Apply the
+         * proportional compensation to its intent, never on top of our own
+         * previous write. */
+        float target = scale * g_pace_factor;
+        g_sp_set_scale(target, NULL);
+        g_pace_applied = target;
+        scale = target;
+    }
+    static uint64_t wall_prev;
+    static float game_prev;
+    static int32_t frame_prev;
+    static int primed;
+    uint64_t wall = monotonic_milliseconds();
+    if (!primed) {
+        primed = 1;
+        wall_prev = wall;
+        game_prev = g_sp_get_time(NULL, NULL);
+        frame_prev = g_sp_get_framecount(NULL, NULL);
+        return;
+    }
+    if (wall - wall_prev < 1000u)
+        return;
+    float game = g_sp_get_time(NULL, NULL);
+    int32_t frames = g_sp_get_framecount(NULL, NULL);
+    float dwall = (float)(wall - wall_prev) / 1000.0f;
+    float dgame = game - game_prev;
+    float ratio = dwall > 0.0f ? dgame / dwall : 0.0f;
+    if (g_pace_enabled && !g_pace_engaged) {
+        /* Engage only from the pristine state: timeScale untouched at 1.0
+         * and a sustained ~2x game-time/wall-time ratio. A healthy engine
+         * (ratio ~1) never trips this. */
+        if (scale > 0.95f && scale < 1.05f &&
+            ratio > 1.6f && ratio < 2.6f)
+            ++g_pace_hits;
+        else
+            g_pace_hits = 0;
+        if (g_pace_hits >= 3) {
+            g_pace_engaged = 1;
+            float target = scale * g_pace_factor;
+            g_sp_set_scale(target, NULL);
+            g_pace_applied = target;
+            fprintf(stderr,
+                    "[speed] inflacao de deltaTime medida (ratio=%.3f) — "
+                    "compensacao timeScale x%.2f engatada\n",
+                    (double)ratio, (double)g_pace_factor);
+            scale = target;
+        }
+    }
+    if (g_speedlog)
+        fprintf(stderr,
+                "[speed] ratio=%.3f dgame=%.2f dwall=%.2f fps=%.1f "
+                "timeScale=%.3f dt=%.4f udt=%.4f%s\n",
+                (double)ratio, (double)dgame, (double)dwall,
+                dwall > 0.0f
+                    ? (double)((float)(frames - frame_prev) / dwall) : 0.0,
+                (double)scale, (double)g_sp_get_delta(NULL, NULL),
+                (double)g_sp_get_unscaled(NULL, NULL),
+                g_pace_engaged ? " [governado]" : "");
+    wall_prev = wall;
+    game_prev = game;
+    frame_prev = frames;
 }
 
 static void firelog_install(dt_module *il2cpp) {
@@ -431,6 +592,7 @@ void dt_gamepad_frame_begin(void) {
         &g_right_x_bits, memory_order_relaxed));
     g_frame_right_y = bits_float(atomic_load_explicit(
         &g_right_y_bits, memory_order_relaxed));
+    speed_probe_tick();
 }
 
 /*
@@ -644,6 +806,52 @@ static void *find_method(dt_module *il2cpp, const char *class_name,
         klass, method_name, parameter_count);
 }
 
+static void *find_class_ns(dt_module *il2cpp, const char *name_space,
+                           const char *class_name) {
+#define API(type, name)                                                        \
+    type name = (type)dt_module_symbol(il2cpp, #name)
+    API(il2cpp_domain_get_fn, il2cpp_domain_get);
+    API(il2cpp_domain_get_assemblies_fn, il2cpp_domain_get_assemblies);
+    API(il2cpp_assembly_get_image_fn, il2cpp_assembly_get_image);
+    API(il2cpp_class_from_name_fn, il2cpp_class_from_name);
+#undef API
+
+    if (!il2cpp_domain_get || !il2cpp_domain_get_assemblies ||
+        !il2cpp_assembly_get_image || !il2cpp_class_from_name)
+        return NULL;
+
+    void *domain = il2cpp_domain_get();
+    if (!domain)
+        return NULL;
+    size_t assembly_count = 0;
+    const void **assemblies =
+        il2cpp_domain_get_assemblies(domain, &assembly_count);
+    if (!assemblies)
+        return NULL;
+
+    for (size_t index = 0; index < assembly_count; ++index) {
+        void *image = il2cpp_assembly_get_image(assemblies[index]);
+        void *klass = image
+            ? il2cpp_class_from_name(image, name_space, class_name) : NULL;
+        if (klass)
+            return klass;
+    }
+    return NULL;
+}
+
+static void *find_method_ns(dt_module *il2cpp, const char *name_space,
+                            const char *class_name, const char *method_name,
+                            int parameter_count) {
+    il2cpp_class_get_method_from_name_fn il2cpp_class_get_method_from_name =
+        (il2cpp_class_get_method_from_name_fn)
+        dt_module_symbol(il2cpp, "il2cpp_class_get_method_from_name");
+    void *klass = find_class_ns(il2cpp, name_space, class_name);
+    if (!il2cpp_class_get_method_from_name || !klass)
+        return NULL;
+    return (void *)il2cpp_class_get_method_from_name(
+        klass, method_name, parameter_count);
+}
+
 static int replace_method_body(dt_module *il2cpp, const void *method,
                                void *replacement, const char *name) {
 #if defined(__aarch64__)
@@ -822,6 +1030,7 @@ void dt_gamepad_try_install(void) {
             moga_neutered);
 
     busy_guard_install(il2cpp);
+    speed_probe_install(il2cpp);
     firelog_install(il2cpp);
 
     g_install_state = 1;
