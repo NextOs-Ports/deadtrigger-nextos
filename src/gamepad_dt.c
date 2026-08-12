@@ -119,6 +119,7 @@ static void *find_method_ns(dt_module *il2cpp, const char *name_space,
                             const char *class_name, const char *method_name,
                             int parameter_count);
 static uint64_t monotonic_milliseconds(void);
+static void gamepad_env_init(void);
 static int replace_method_body(dt_module *il2cpp, const void *method,
                                void *replacement, const char *name);
 
@@ -554,6 +555,373 @@ static uint64_t monotonic_milliseconds(void) {
            (uint64_t)value.tv_nsec / 1000000u;
 }
 
+/*
+ * DT_ATTACKLOG=1: diagnostic probe for the field reports "zombie swing too
+ * fast", "zombies silent when attacking" and "storage melts in defense
+ * missions". Three faithful reimplementations with logging on top:
+ * ComponentEnemy.PlayAttackSound (does the attack roar even get requested?),
+ * AgentHuman.SoundUniquePlay(clip) (all agent voice traffic) and
+ * DestructibleObject.TakeDamage (damage per swing + cadence + HP drain).
+ * Never enabled by the release launcher; nothing here runs without the env.
+ */
+typedef void (*il2cpp_field_static_set_value_fn)(void *, void *);
+typedef void *(*il2cpp_string_new_fn)(const char *);
+typedef float (*m_sup3_fn)(void *, void *, float, void *, void *);
+typedef uint8_t (*m_bool_obj_fn)(void *, void *, void *);
+typedef void (*m_ondamage_fn)(void *, void *, float, uint8_t, void *);
+
+static int g_attacklog;
+static il2cpp_string_new_fn g_al_string_new;
+static il2cpp_field_static_set_value_fn g_al_static_set;
+static m_obj_fn g_al_get_attack;      /* ComponentEnemy.get_AttackSound */
+static m_obj_fn g_al_get_spit;        /* ComponentEnemy.get_SpitSound */
+static m_obj_fn g_al_obj_name;        /* UnityEngine.Object.get_name */
+static m_float_fn g_al_clip_length;   /* AudioClip.get_length */
+static m_float_fn g_al_time_sll;      /* Time.get_timeSinceLevelLoad */
+static m_sup3_fn g_al_sup3;           /* SoundUniquePlay(clip, lock, name) */
+static m_bool_obj_fn g_al_is_playing; /* AgentHuman.IsSoundPlaying(clip) */
+static m_ondamage_fn g_al_ondamage;   /* DestructibleObject.OnDamage */
+static size_t g_al_off_ce_owner;      /* ComponentEnemy.<Owner>k__BackingField */
+static size_t g_al_off_asp;           /* ComponentEnemy.AttackSoundPlaying */
+static void *g_al_f_dontspeak;        /* static ComponentEnemy.DontSpeakTimer */
+static size_t g_al_off_versions;      /* DestructibleObject.m_Versions */
+static size_t g_al_off_currversion;   /* DestructibleObject.m_CurrVersion */
+static size_t g_al_off_remaining;     /* DestructibleObject.m_RemainingHP */
+static size_t g_al_off_total;         /* DestructibleObject.m_TotalHP */
+
+static void il2string_ascii(void *str, char *out, size_t cap) {
+    out[0] = 0;
+    if (!str || cap < 2)
+        return;
+    int32_t length = *(int32_t *)((char *)str + 0x10);
+    const uint16_t *chars = (const uint16_t *)((char *)str + 0x14);
+    if (length < 0 || length > 255)
+        return;
+    size_t written = 0;
+    for (int32_t index = 0; index < length && written + 1 < cap; ++index)
+        out[written++] = chars[index] >= 32 && chars[index] < 127
+            ? (char)chars[index] : '?';
+    out[written] = 0;
+}
+
+/* AgentHuman.SoundUniquePlay(clip) == SoundUniquePlay(clip, clip.length,
+ * clip.name); reimplemented verbatim with a log line per voice play. */
+static float hooked_sound_unique_play1(void *agent, void *clip) {
+    if (!clip || !g_al_sup3)
+        return 0.0f;
+    float length = g_al_clip_length ? g_al_clip_length(clip, NULL) : 0.0f;
+    void *name_obj = g_al_obj_name ? g_al_obj_name(clip, NULL) : NULL;
+    uint8_t busy = g_al_is_playing ? g_al_is_playing(agent, clip, NULL) : 0;
+    float result = g_al_sup3(agent, clip, length, name_obj, NULL);
+    char name[48];
+    il2string_ascii(name_obj, name, sizeof name);
+    fprintf(stderr,
+            "[atk] %llu voice agent=%p clip=%s len=%.2f ja_tocando=%u\n",
+            (unsigned long long)monotonic_milliseconds(), agent, name,
+            (double)length, busy);
+    return result;
+}
+
+/* ComponentEnemy.PlayAttackSound(type): clip = type == 6 (E_MELEE_SPIT)
+ * ? SpitSound : AttackSound; AttackSoundPlaying = true;
+ * Owner.SoundUniquePlay(clip, clip.length, "Attack");
+ * DontSpeakTimer = Time.timeSinceLevelLoad + clip.length; returns length. */
+static float hooked_play_attack_sound(void *self, int32_t type) {
+    uint64_t now = monotonic_milliseconds();
+    void *clip = type == 6
+        ? (g_al_get_spit ? g_al_get_spit(self, NULL) : NULL)
+        : (g_al_get_attack ? g_al_get_attack(self, NULL) : NULL);
+    if (!clip) {
+        fprintf(stderr, "[atk] %llu roar type=%d clip=NULL (sem som!)\n",
+                (unsigned long long)now, type);
+        return 0.0f;
+    }
+    if (g_al_off_asp)
+        *(uint8_t *)((char *)self + g_al_off_asp) = 1;
+    float length = g_al_clip_length ? g_al_clip_length(clip, NULL) : 0.0f;
+    void *owner = fl_read_ptr(self, g_al_off_ce_owner);
+    uint8_t busy = owner && g_al_is_playing
+        ? g_al_is_playing(owner, clip, NULL) : 0;
+    if (owner && g_al_sup3) {
+        void *lock_name =
+            g_al_string_new ? g_al_string_new("Attack") : NULL;
+        g_al_sup3(owner, clip, length, lock_name, NULL);
+    }
+    float level_time = g_al_time_sll ? g_al_time_sll(NULL, NULL) : 0.0f;
+    if (g_al_f_dontspeak && g_al_static_set) {
+        float until = level_time + length;
+        g_al_static_set(g_al_f_dontspeak, &until);
+    }
+    char name[48];
+    void *name_obj = g_al_obj_name ? g_al_obj_name(clip, NULL) : NULL;
+    il2string_ascii(name_obj, name, sizeof name);
+    fprintf(stderr,
+            "[atk] %llu roar type=%d clip=%s len=%.2f owner=%p "
+            "ja_tocando=%u t=%.2f\n",
+            (unsigned long long)now, type, name, (double)length, owner,
+            busy, (double)level_time);
+    return length;
+}
+
+/* DestructibleObject.TakeDamage(attacker, damage): forwards to
+ * OnDamage(attacker, damage, true) while versions remain; logs the swing. */
+static void hooked_take_damage(void *self, void *attacker, float damage) {
+    void *versions = fl_read_ptr(self, g_al_off_versions);
+    /* List<T> on arm64: _items @0x10, _size @0x18. */
+    int32_t count = versions ? *(int32_t *)((char *)versions + 0x18) : 0;
+    int32_t current = g_al_off_currversion
+        ? *(int32_t *)((char *)self + g_al_off_currversion) : 0;
+    float before = g_al_off_remaining
+        ? *(float *)((char *)self + g_al_off_remaining) : 0.0f;
+    float total = g_al_off_total
+        ? *(float *)((char *)self + g_al_off_total) : 0.0f;
+    if (versions && current < count - 1 && g_al_ondamage)
+        g_al_ondamage(self, attacker, damage, 1, NULL);
+    float after = g_al_off_remaining
+        ? *(float *)((char *)self + g_al_off_remaining) : 0.0f;
+    fprintf(stderr,
+            "[atk] %llu dano obj=%p agressor=%p dmg=%.2f hp=%.1f->%.1f/"
+            "%.1f ver=%d/%d\n",
+            (unsigned long long)monotonic_milliseconds(), self, attacker,
+            (double)damage, (double)before, (double)after, (double)total,
+            current, count);
+}
+
+/*
+ * Attack-roar fix ("zombies stay completely silent when attacking", Discord
+ * field report). UpdateSpeech only requests the melee roar when
+ * Owner.IsVisible && !BlackBoard.Stop && Owner.IsAlive &&
+ * !AttackSoundPlaying && MotionType == Attack(3), and AgentHuman.IsVisible
+ * is just Renderer.isVisible of the REFERENCE SkinnedMeshRenderer. Measured
+ * live on the R36S: zombies drawn through LOD1/LOD2 keep the reference
+ * renderer culled (vis=0 while lods=v0,v1,v0), so an on-screen zombie counts
+ * as invisible and never roars — only frames where LOD0 takes over let the
+ * roar through ("I hear it sometimes"). The getter is reimplemented to treat
+ * the agent as visible when ANY of its renderers (reference or LOD) is
+ * visible, which is the getter's evident intent. DT_VIS_FIX=0 restores the
+ * original reference-only behavior. Validated live on the R36S (every
+ * attacking zombie roars again). The gate log below only runs under
+ * DT_ATTACKLOG.
+ */
+static m_bool_fn g_al_renderer_visible;  /* Renderer.get_isVisible */
+static m_bool_fn g_al_renderer_enabled;  /* Renderer.get_enabled */
+static size_t g_al_off_agent_renderer;   /* AgentHuman.<Renderer>k__BackingField */
+static size_t g_al_off_agent_lods;       /* AgentHuman.<LodRenderers>k__BackingField */
+static size_t g_al_off_agent_bb;         /* AgentHuman.BlackBoard */
+static size_t g_al_off_agent_enemy;      /* AgentHuman.<EnemyComponent>k__BackingField */
+static size_t g_al_off_bb_motion;        /* BlackBoard.MotionType */
+static size_t g_al_off_bb_stop;          /* BlackBoard.<Stop>k__BackingField */
+
+static int g_vis_fix = 1;                /* DT_VIS_FIX=0 desliga o OR de LODs */
+
+static uint8_t hooked_get_is_visible(void *agent) {
+    void *renderer = fl_read_ptr(agent, g_al_off_agent_renderer);
+    uint8_t visible = renderer && g_al_renderer_visible
+        ? (g_al_renderer_visible(renderer, NULL) & 1) : 0;
+    if (!visible && g_vis_fix && g_al_off_agent_lods &&
+        g_al_renderer_visible) {
+        /* Candidate fix: the reference SkinnedMeshRenderer goes dark when
+         * the LOD system draws a sibling; the agent is still on screen, so
+         * treat any visible LOD renderer as visible. */
+        void *lod_array = fl_read_ptr(agent, g_al_off_agent_lods);
+        int32_t count = lod_array
+            ? *(int32_t *)((char *)lod_array + 0x18) : 0;
+        for (int32_t index = 0; index < count && index < 8 && !visible;
+             ++index) {
+            void *lod = ((void **)((char *)lod_array + 0x20))[index];
+            if (lod)
+                visible = g_al_renderer_visible(lod, NULL) & 1;
+        }
+    }
+    if (!g_attacklog)
+        return visible;
+    void *board = fl_read_ptr(agent, g_al_off_agent_bb);
+    int32_t motion = board && g_al_off_bb_motion
+        ? *(int32_t *)((char *)board + g_al_off_bb_motion) : -1;
+    if (motion == 3) {
+        static uint64_t last_millis;
+        uint64_t now = monotonic_milliseconds();
+        if (now - last_millis >= 1000u) {
+            last_millis = now;
+            uint8_t stop = board && g_al_off_bb_stop
+                ? fl_read_bool(board, g_al_off_bb_stop) : 0;
+            void *enemy = fl_read_ptr(agent, g_al_off_agent_enemy);
+            uint8_t roaring = enemy && g_al_off_asp
+                ? fl_read_bool(enemy, g_al_off_asp) : 0;
+            uint8_t ref_enabled = renderer && g_al_renderer_enabled
+                ? (g_al_renderer_enabled(renderer, NULL) & 1) : 0;
+            /* LodRenderers: il2cpp array on arm64 keeps the length at
+             * 0x18 and pointer elements from 0x20. */
+            char lods[64] = "-";
+            void *lod_array = fl_read_ptr(agent, g_al_off_agent_lods);
+            if (lod_array) {
+                int32_t count =
+                    *(int32_t *)((char *)lod_array + 0x18);
+                size_t used = 0;
+                lods[0] = 0;
+                for (int32_t index = 0;
+                     index < count && index < 4 &&
+                     used + 8 < sizeof lods; ++index) {
+                    void *lod = ((void **)((char *)lod_array + 0x20))
+                        [index];
+                    uint8_t lv = lod && g_al_renderer_visible
+                        ? (g_al_renderer_visible(lod, NULL) & 1) : 0;
+                    uint8_t le = lod && g_al_renderer_enabled
+                        ? (g_al_renderer_enabled(lod, NULL) & 1) : 0;
+                    used += (size_t)snprintf(lods + used,
+                                             sizeof lods - used,
+                                             "%sv%ue%u",
+                                             index ? "," : "", lv, le);
+                }
+            }
+            fprintf(stderr,
+                    "[atk] %llu gate agent=%p vis=%u en=%u stop=%u "
+                    "roar_flag=%u lods=%s\n",
+                    (unsigned long long)now, agent, visible, ref_enabled,
+                    stop, roaring, lods);
+        }
+    }
+    return visible;
+}
+
+static void attacklog_install(dt_module *il2cpp) {
+    if (!g_attacklog)
+        return;
+    il2cpp_class_get_field_from_name_fn class_get_field =
+        (il2cpp_class_get_field_from_name_fn)
+        dt_module_symbol(il2cpp, "il2cpp_class_get_field_from_name");
+    il2cpp_field_get_offset_fn field_offset = (il2cpp_field_get_offset_fn)
+        dt_module_symbol(il2cpp, "il2cpp_field_get_offset");
+    g_al_string_new = (il2cpp_string_new_fn)
+        dt_module_symbol(il2cpp, "il2cpp_string_new");
+    g_al_static_set = (il2cpp_field_static_set_value_fn)
+        dt_module_symbol(il2cpp, "il2cpp_field_static_set_value");
+    const void *m_play =
+        find_method(il2cpp, "ComponentEnemy", "PlayAttackSound", 1);
+    const void *m_attack =
+        find_method(il2cpp, "ComponentEnemy", "get_AttackSound", 0);
+    const void *m_spit =
+        find_method(il2cpp, "ComponentEnemy", "get_SpitSound", 0);
+    const void *m_sup1 =
+        find_method(il2cpp, "AgentHuman", "SoundUniquePlay", 1);
+    const void *m_sup3 =
+        find_method(il2cpp, "AgentHuman", "SoundUniquePlay", 3);
+    const void *m_isplay =
+        find_method(il2cpp, "AgentHuman", "IsSoundPlaying", 1);
+    const void *m_length =
+        find_method_ns(il2cpp, "UnityEngine", "AudioClip", "get_length", 0);
+    const void *m_name =
+        find_method_ns(il2cpp, "UnityEngine", "Object", "get_name", 0);
+    const void *m_sll = find_method_ns(il2cpp, "UnityEngine", "Time",
+                                       "get_timeSinceLevelLoad", 0);
+    const void *m_take =
+        find_method(il2cpp, "DestructibleObject", "TakeDamage", 2);
+    const void *m_ondmg =
+        find_method(il2cpp, "DestructibleObject", "OnDamage", 3);
+    void *c_enemy = find_class(il2cpp, "ComponentEnemy");
+    void *c_destr = find_class(il2cpp, "DestructibleObject");
+    if (!class_get_field || !field_offset || !m_play || !m_attack ||
+        !m_spit || !m_sup1 || !m_sup3 || !m_isplay || !m_length ||
+        !m_name || !m_sll || !m_take || !m_ondmg || !c_enemy || !c_destr) {
+        fprintf(stderr, "[atk] metadata incompleta; attacklog desativado\n");
+        return;
+    }
+    void *f_owner = class_get_field(c_enemy, "<Owner>k__BackingField");
+    void *f_asp = class_get_field(c_enemy, "AttackSoundPlaying");
+    g_al_f_dontspeak = class_get_field(c_enemy, "DontSpeakTimer");
+    void *f_versions = class_get_field(c_destr, "m_Versions");
+    void *f_curr = class_get_field(c_destr, "m_CurrVersion");
+    void *f_remaining = class_get_field(c_destr, "m_RemainingHP");
+    void *f_total = class_get_field(c_destr, "m_TotalHP");
+    if (!f_owner || !f_asp || !g_al_f_dontspeak || !f_versions || !f_curr ||
+        !f_remaining || !f_total) {
+        fprintf(stderr, "[atk] campos ausentes; attacklog desativado\n");
+        return;
+    }
+    g_al_off_ce_owner = field_offset(f_owner);
+    g_al_off_asp = field_offset(f_asp);
+    g_al_off_versions = field_offset(f_versions);
+    g_al_off_currversion = field_offset(f_curr);
+    g_al_off_remaining = field_offset(f_remaining);
+    g_al_off_total = field_offset(f_total);
+    g_al_get_attack = (m_obj_fn)*(const uintptr_t *)m_attack;
+    g_al_get_spit = (m_obj_fn)*(const uintptr_t *)m_spit;
+    g_al_sup3 = (m_sup3_fn)*(const uintptr_t *)m_sup3;
+    g_al_is_playing = (m_bool_obj_fn)*(const uintptr_t *)m_isplay;
+    g_al_clip_length = (m_float_fn)*(const uintptr_t *)m_length;
+    g_al_obj_name = (m_obj_fn)*(const uintptr_t *)m_name;
+    g_al_time_sll = (m_float_fn)*(const uintptr_t *)m_sll;
+    g_al_ondamage = (m_ondamage_fn)*(const uintptr_t *)m_ondmg;
+    int installed = 0;
+    installed += replace_method_body(il2cpp, m_play,
+                                     (void *)&hooked_play_attack_sound,
+                                     "PlayAttackSound");
+    installed += replace_method_body(il2cpp, m_sup1,
+                                     (void *)&hooked_sound_unique_play1,
+                                     "SoundUniquePlay(clip)");
+    installed += replace_method_body(il2cpp, m_take,
+                                     (void *)&hooked_take_damage,
+                                     "TakeDamage");
+    fprintf(stderr, "[atk] attacklog instalado (%d/3 hooks)\n", installed);
+}
+
+static void visfix_install(dt_module *il2cpp) {
+    gamepad_env_init();
+    if (!g_vis_fix && !g_attacklog)
+        return;
+    il2cpp_class_get_field_from_name_fn class_get_field =
+        (il2cpp_class_get_field_from_name_fn)
+        dt_module_symbol(il2cpp, "il2cpp_class_get_field_from_name");
+    il2cpp_field_get_offset_fn field_offset = (il2cpp_field_get_offset_fn)
+        dt_module_symbol(il2cpp, "il2cpp_field_get_offset");
+    const void *m_isvis =
+        find_method(il2cpp, "AgentHuman", "get_IsVisible", 0);
+    const void *m_rvis = find_method_ns(il2cpp, "UnityEngine", "Renderer",
+                                        "get_isVisible", 0);
+    const void *m_ren = find_method_ns(il2cpp, "UnityEngine", "Renderer",
+                                       "get_enabled", 0);
+    void *c_agent = find_class(il2cpp, "AgentHuman");
+    void *c_board = find_class(il2cpp, "BlackBoard");
+    void *f_renderer = c_agent && class_get_field
+        ? class_get_field(c_agent, "<Renderer>k__BackingField") : NULL;
+    void *f_lods = c_agent && class_get_field
+        ? class_get_field(c_agent, "<LodRenderers>k__BackingField") : NULL;
+    if (!class_get_field || !field_offset || !m_isvis || !m_rvis ||
+        !f_renderer || !f_lods) {
+        fprintf(stderr,
+                "[gamepad] aviso: metadata de IsVisible ausente — roar de "
+                "ataque segue o culling do LOD0\n");
+        return;
+    }
+    g_al_renderer_visible = (m_bool_fn)*(const uintptr_t *)m_rvis;
+    if (m_ren)
+        g_al_renderer_enabled = (m_bool_fn)*(const uintptr_t *)m_ren;
+    g_al_off_agent_renderer = field_offset(f_renderer);
+    g_al_off_agent_lods = field_offset(f_lods);
+    /* Gate-sampler extras (log only, best effort). */
+    void *f_agent_bb = class_get_field(c_agent, "BlackBoard");
+    void *f_agent_enemy =
+        class_get_field(c_agent, "<EnemyComponent>k__BackingField");
+    void *f_motion = c_board
+        ? class_get_field(c_board, "MotionType") : NULL;
+    void *f_stop = c_board
+        ? class_get_field(c_board, "<Stop>k__BackingField") : NULL;
+    if (f_agent_bb)
+        g_al_off_agent_bb = field_offset(f_agent_bb);
+    if (f_agent_enemy)
+        g_al_off_agent_enemy = field_offset(f_agent_enemy);
+    if (f_motion)
+        g_al_off_bb_motion = field_offset(f_motion);
+    if (f_stop)
+        g_al_off_bb_stop = field_offset(f_stop);
+    if (replace_method_body(il2cpp, m_isvis,
+                            (void *)&hooked_get_is_visible,
+                            "get_IsVisible"))
+        fprintf(stderr,
+                "[gamepad] IsVisible considera todos os LODs (fix roar de "
+                "ataque)%s\n", g_vis_fix ? "" : " [SOMENTE LOG]");
+}
+
 static void gamepad_env_init(void) {
     static int initialized;
     if (initialized)
@@ -574,6 +942,9 @@ static void gamepad_env_init(void) {
         g_fire_level_down = atoi(setting) != 0;
     g_padlog = getenv("DT_PADLOG") != NULL;
     g_firelog = getenv("DT_FIRELOG") != NULL;
+    g_attacklog = getenv("DT_ATTACKLOG") != NULL;
+    if ((setting = getenv("DT_VIS_FIX")))
+        g_vis_fix = atoi(setting) != 0;
     if ((setting = getenv("DT_BUSY_GUARD")))
         g_busy_guard = atoi(setting) != 0;
     fprintf(stderr,
@@ -1107,6 +1478,8 @@ void dt_gamepad_try_install(void) {
     busy_guard_install(il2cpp);
     speed_probe_install(il2cpp);
     firelog_install(il2cpp);
+    visfix_install(il2cpp);
+    attacklog_install(il2cpp);
 
     g_install_state = 1;
     fprintf(stderr,
