@@ -3,7 +3,7 @@
   "source_root": ".",
   "package": {
     "id": "deadtrigger",
-    "version": "1.0.9",
+    "version": "1.1.0",
     "profile": "universal-portmaster",
     "launcher": "Dead Trigger.sh",
     "launcher_chain": [
@@ -11,7 +11,7 @@
     ],
     "launcher_contract": {
       "generator": "nxbootstrap",
-      "version": "0.6.4",
+      "version": "0.6.5",
       "config_path": "deadtrigger/nxport.json",
       "config_sha256": "3e8132eb25c638f87c725f0282249e3aa96248d460ace18744ced128af02f8e9"
     },
@@ -108,7 +108,7 @@
       "target": "Dead Trigger.sh",
       "kind": "launcher",
       "mode": "0755",
-      "sha256": "8c836132f9018595be97539bf52309dbe0957a1f795afeeda54977f33f301f18"
+      "sha256": "2b38e7cd0c263756638b0b5bda36b762bb7009e867984a86de350cc589f2fa8e"
     },
     {
       "source": "nxport.json",
@@ -125,7 +125,7 @@
       "architecture": "aarch64",
       "build_profile": "universal-low-glibc",
       "provenance": "build_universal.sh; pinned AArch64 GCC 16.1.0 objects with Buster libc headers; pinned offline Debian Buster image sha256:036c7910ea53bc78cc213452afa92fa83d55de1c51ae54f315af58b5a41a45cf for link and strip",
-      "sha256": "803e570352612a8d13c90d6f1b669603f352cc81d8e706adce35841d56559e3c",
+      "sha256": "60c82c0aa1a290e99e8f41a85b3d5e6aa54d378689480130c6488c05796f9979",
       "needed": [
         "libEGL.so",
         "libGLESv2.so",
@@ -144,7 +144,7 @@
       "target": "deadtrigger/README.md",
       "kind": "payload",
       "mode": "0644",
-      "sha256": "86a9b5b6227bf040c391f1116f4584be74c98b0a0c74d33329b65ab8148c4661"
+      "sha256": "d544ad1aeafb656f8e1b5d968125a5b553700add45dcd39787d391400d9189fb"
     },
     {
       "source": "INSTALLATION.md",
@@ -179,7 +179,7 @@
       "target": "deadtrigger/version.txt",
       "kind": "payload",
       "mode": "0644",
-      "sha256": "2df2bd7011e87351e2e3e296ddb7f2520270a76160f95b2d64b337167294f28c"
+      "sha256": "1575e1af4a95f12f70b4ee6a6adce8160953d93ea17dc2611b90883ccc3ad3b8"
     },
     {
       "source": "gamedata/README.txt",

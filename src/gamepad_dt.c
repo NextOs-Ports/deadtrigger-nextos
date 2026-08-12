@@ -298,6 +298,41 @@ static int g_pace_hits;               /* consecutive ~2x samples */
 static float g_pace_factor = 0.5f;    /* compensation applied when engaged */
 static float g_pace_applied = -1.0f;  /* last timeScale written by us */
 
+/*
+ * Intended-view fix for the governor's side effects on audio ("zombie moans
+ * in slow motion", "music only partially right"). The game derives audio
+ * pitch from the timeScale it reads back: MusicManager.Update and
+ * AgentHuman.LateUpdate both do pitch = timeScale >= 1 ? 1 :
+ * Mathf.Max(timeScale, 0.5) — with the compensated 0.5 permanently visible,
+ * every AgentHuman voice and the music track play at half pitch.
+ * TimeManager.GetRealDeltaTime (deltaTime/timeScale) is skewed the same way.
+ *
+ * The C# wrapper of Time.get_timeScale is therefore replaced so the GAME
+ * always observes the pace it asked for (a healthy engine's view): the raw
+ * engine value divided by the compensation while it matches our own write,
+ * untouched otherwise (fresh game writes ARE the intent; 0 means paused).
+ * The governor itself reads the raw value through the native icall, which
+ * survives the wrapper patch. DT_PITCH_FIX=0 restores the old behavior.
+ */
+typedef float (*icall_get_float_fn)(void);
+typedef void *(*il2cpp_resolve_icall_fn)(const char *);
+static icall_get_float_fn g_raw_get_scale;
+static int g_pitch_fix = 1;
+
+static float read_raw_time_scale(void) {
+    return g_raw_get_scale ? g_raw_get_scale()
+                           : g_sp_get_scale(NULL, NULL);
+}
+
+static float hooked_get_time_scale(void) {
+    float raw = g_raw_get_scale();
+    if (!g_pace_engaged || raw <= 0.0005f)
+        return raw;
+    if (fabsf(raw - g_pace_applied) <= 0.0005f)
+        return raw / g_pace_factor;
+    return raw;
+}
+
 static void speed_probe_install(dt_module *il2cpp) {
     const char *log_setting = getenv("DT_SPEEDLOG");
     const char *scale_setting = getenv("DT_TIME_SCALE");
@@ -341,12 +376,43 @@ static void speed_probe_install(dt_module *il2cpp) {
     g_sp_ready = 1;
     fprintf(stderr, "[speed] sonda instalada (log=%d timeScale=%.2f)\n",
             g_speedlog, (double)g_time_scale_override);
+
+    const char *pitch_setting = getenv("DT_PITCH_FIX");
+    if (pitch_setting && atoi(pitch_setting) == 0)
+        g_pitch_fix = 0;
+    if (!g_pitch_fix || !g_pace_enabled)
+        return;
+    il2cpp_resolve_icall_fn resolve_icall = (il2cpp_resolve_icall_fn)
+        dt_module_symbol(il2cpp, "il2cpp_resolve_icall");
+    if (resolve_icall) {
+        g_raw_get_scale = (icall_get_float_fn)
+            resolve_icall("UnityEngine.Time::get_timeScale()");
+        if (!g_raw_get_scale)
+            g_raw_get_scale = (icall_get_float_fn)
+                resolve_icall("UnityEngine.Time::get_timeScale");
+    }
+    if (!g_raw_get_scale) {
+        fprintf(stderr,
+                "[speed] aviso: icall get_timeScale nao resolvido — pitch "
+                "de audio segue o timeScale compensado\n");
+        return;
+    }
+    if (replace_method_body(il2cpp, m_scale,
+                            (void *)&hooked_get_time_scale,
+                            "get_timeScale"))
+        fprintf(stderr,
+                "[speed] get_timeScale devolve o ritmo pretendido ao jogo "
+                "(fix pitch musica/zumbis)\n");
+    else
+        g_raw_get_scale = NULL;
 }
 
 static void speed_probe_tick(void) {
     if (!g_sp_ready)
         return;
-    float scale = g_sp_get_scale(NULL, NULL);
+    /* Raw ENGINE value on purpose: after the intended-view hook installs,
+     * the C# getter reports the game's intent, not what we wrote. */
+    float scale = read_raw_time_scale();
     if (g_time_scale_override > 0.0f && scale > 0.999f &&
         fabsf(scale - g_time_scale_override) > 0.001f) {
         /* Only the normal-play state is tamed; slow-mo (<1) stays owned by
